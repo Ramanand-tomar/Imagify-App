@@ -50,14 +50,19 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY backend/alembic.ini ./alembic.ini
 COPY backend/alembic ./alembic
 COPY backend/app ./app
+COPY backend/Procfile ./Procfile
 
 EXPOSE 8000
 
-# Startup: run migrations, then launch Uvicorn. Honors $PORT (Railway/Render
-# inject it) and $WEB_CONCURRENCY (optional override for worker count).
-CMD sh -c 'alembic upgrade head && exec uvicorn app.main:app \
-    --host 0.0.0.0 \
-    --port "${PORT:-8000}" \
-    --workers "${WEB_CONCURRENCY:-2}" \
-    --proxy-headers \
-    --forwarded-allow-ips="*"'
+# Single-container mode: honcho runs BOTH the `web` (uvicorn) and `worker`
+# (celery) processes defined in ./Procfile, inside the same container.
+#
+# Why: on Railway, separate services don't share a filesystem. The API writes
+# uploaded files to /tmp/imagify so the Celery worker can read them for async
+# tasks (compress, to-jpg, super-res, low-light, denoise-ai, deblur, batch,
+# OCR-pdf). Running both in one container means /tmp is shared — no refactor
+# needed.
+#
+# Honcho propagates env vars from the container, so $PORT (injected by
+# Railway) is honored by uvicorn via the Procfile's ${PORT:-8000}.
+CMD ["honcho", "start"]
