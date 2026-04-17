@@ -2,21 +2,26 @@ services:
   - type: web
     name: imagify-api
     env: python
+    rootDir: backend
     buildCommand: ./build.sh
+    # Render automatically assigns $PORT, your app should listen on 0.0.0.0
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - fromGroup: imagify-env
-      - key: PORT
-        value: 8000
+      - key: PYTHON_VERSION
+        value: 3.12.1
 
   - type: worker
     name: imagify-worker
     env: python
+    rootDir: backend
     buildCommand: ./build.sh
     startCommand: celery -A app.core.celery_app worker --loglevel=info
     envVars:
       - fromGroup: imagify-env
+      - key: PYTHON_VERSION
+        value: 3.12.1
 
 envGroups:
   - name: imagify-env
