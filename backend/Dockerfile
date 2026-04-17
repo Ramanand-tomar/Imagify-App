@@ -1,3 +1,10 @@
+# Build context: repo root (Railway default when no Root Directory is set).
+# Therefore every COPY path is prefixed with `backend/`.
+# In Railway Settings, set:
+#   Dockerfile Path = /backend/Dockerfile
+#   Watch Paths     = /backend/**
+# (leave Root Directory unset)
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -6,7 +13,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     DEBIAN_FRONTEND=noninteractive
 
-# --- Core system deps (required for app build + runtime) ---
+# --- Core system deps ---
 RUN set -eux; \
     apt-get update -o Acquire::Retries=3; \
     apt-get install -y --no-install-recommends \
@@ -35,18 +42,18 @@ RUN set -eux; \
 
 WORKDIR /app
 
-# Python deps first (cacheable layer)
-COPY requirements.txt .
+# --- Python deps (cacheable layer) ---
+COPY backend/requirements.txt ./requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# App source
-COPY alembic.ini ./alembic.ini
-COPY alembic ./alembic
-COPY app ./app
+# --- App source ---
+COPY backend/alembic.ini ./alembic.ini
+COPY backend/alembic ./alembic
+COPY backend/app ./app
 
 EXPOSE 8000
 
-# Startup: run migrations, then start Uvicorn. Honors $PORT (Railway/Render
+# Startup: run migrations, then launch Uvicorn. Honors $PORT (Railway/Render
 # inject it) and $WEB_CONCURRENCY (optional override for worker count).
 CMD sh -c 'alembic upgrade head && exec uvicorn app.main:app \
     --host 0.0.0.0 \

@@ -1,0 +1,56 @@
+# Exclude everything that isn't part of the backend build.
+# Keeps the Docker build context small and fast on Railway/Render.
+
+# Frontend
+frontend/
+*.tsx
+*.ts
+node_modules/
+.expo/
+.expo-shared/
+dist/
+web-build/
+
+# Secrets & env
+**/.env
+**/.env.*
+!**/.env.example
+
+# Git & CI
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# IDE / OS
+.vscode/
+.idea/
+.cursor/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Python build artifacts
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+**/venv/
+**/env/
+
+# Local backend dev state
+backend/docker-compose.yml
+backend/entrypoint.sh
+backend/pgdata/
+backend/redisdata/
+backend/shared_tmp/
+
+# Logs & docs
+*.log
+README.md
+docs/
+plans/
