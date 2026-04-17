@@ -36,9 +36,20 @@ class Task(Base):
     )
     batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     celery_task_id: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
-    task_type: Mapped[TaskType] = mapped_column(SQLEnum(TaskType, name="task_type"), nullable=False)
+    # `values_callable` forces SQLAlchemy to serialize the enum's `.value`
+    # ("pdf", "image", "ai", "ocr") instead of the default `.name` ("PDF",
+    # "IMAGE", ...). The Postgres enum type was created with lowercase values
+    # in migration 0001, so without this the INSERT fails with:
+    #   invalid input value for enum task_type: "PDF"
+    task_type: Mapped[TaskType] = mapped_column(
+        SQLEnum(TaskType, name="task_type", values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+    )
     status: Mapped[TaskStatus] = mapped_column(
-        SQLEnum(TaskStatus, name="task_status"), default=TaskStatus.PENDING, index=True, nullable=False
+        SQLEnum(TaskStatus, name="task_status", values_callable=lambda e: [m.value for m in e]),
+        default=TaskStatus.PENDING,
+        index=True,
+        nullable=False,
     )
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
