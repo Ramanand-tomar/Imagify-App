@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: imagify-api
+    env: python
+    buildCommand: ./build.sh
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: imagify-env
+      - key: PORT
+        value: 8000
+
+  - type: worker
+    name: imagify-worker
+    env: python
+    buildCommand: ./build.sh
+    startCommand: celery -A app.core.celery_app worker --loglevel=info
+    envVars:
+      - fromGroup: imagify-env
+
+envGroups:
+  - name: imagify-env
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SYNC_DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: IMAGEKIT_PUBLIC_KEY
+        sync: false
+      - key: IMAGEKIT_PRIVATE_KEY
+        sync: false
+      - key: IMAGEKIT_URL_ENDPOINT
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"

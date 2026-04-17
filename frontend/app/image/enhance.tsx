@@ -1,0 +1,459 @@
+import Slider from "@react-native-community/slider";
+import { Stack } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Button, Chip, HelperText, SegmentedButtons, Text } from "react-native-paper";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { BeforeAfterSlider } from "@/components/BeforeAfterSlider";
+import { FileUploader, type PickedFile } from "@/components/FileUploader";
+import { ResultViewer } from "@/components/ResultViewer";
+import { TaskProgressCard } from "@/components/TaskProgressCard";
+import { useImageSession, type EnhanceOp } from "@/hooks/useImageSession";
+import { api } from "@/services/api";
+import { useTaskStore, type Task } from "@/stores/taskStore";
+
+type TabKey = EnhanceOp | "ai";
+type AiMode = "super-res" | "lowlight" | "denoise-ai";
+
+const OPS: { key: TabKey; label: string; icon: string }[] = [
+  { key: "clahe", label: "Histogram", icon: "chart-histogram" },
+  { key: "contrast", label: "Contrast", icon: "contrast" },
+  { key: "sharpen", label: "Sharpen", icon: "image-filter-center-focus" },
+  { key: "denoise", label: "Denoise", icon: "blur" },
+  { key: "deblur", label: "Deblur", icon: "image-filter" },
+  { key: "homomorphic", label: "Glow", icon: "sun-angle" },
+  { key: "edges", label: "Edges", icon: "vector-square" },
+  { key: "ai", label: "AI ✨", icon: "robot-excited" },
+];
+
+interface Params {
+  clahe: { clip_limit: number; tile_size: number };
+  contrast: { contrast_pct: number; brightness: number };
+  sharpen: { strength: number; radius: number };
+  denoise: { filter_type: "median" | "gaussian" | "bilateral"; kernel_size: number };
+  deblur: { blur_type: "motion" | "defocus"; kernel_size: number; noise_power: number };
+  homomorphic: { gamma_low: number; gamma_high: number; cutoff: number };
+  "denoise-ai": { h: number };
+  edges: { operator: "sobel" | "prewitt" | "canny"; low_thresh: number; high_thresh: number };
+}
+
+const DEFAULTS: Params = {
+  clahe: { clip_limit: 2.0, tile_size: 8 },
+  contrast: { contrast_pct: 0, brightness: 0 },
+  sharpen: { strength: 1.0, radius: 1.5 },
+  denoise: { filter_type: "median", kernel_size: 3 },
+  deblur: { blur_type: "motion", kernel_size: 15, noise_power: 0.01 },
+  homomorphic: { gamma_low: 0.5, gamma_high: 2.0, cutoff: 30.0 },
+  "denoise-ai": { h: 10 },
+  edges: { operator: "canny", low_thresh: 100, high_thresh: 200 },
+};
+
+export default function EnhanceScreen() {
+  const session = useImageSession();
+  const [tab, setTab] = useState<TabKey>("clahe");
+  const [params, setParams] = useState<Params>(DEFAULTS);
+
+  // AI state
+  const [aiMode, setAiMode] = useState<AiMode>("super-res");
+  const [srScale, setSrScale] = useState<2 | 3 | 4>(2);
+  const [lowlightStrength, setLowlightStrength] = useState(1.0);
+  const [aiTaskId, setAiTaskId] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiSubmitting, setAiSubmitting] = useState(false);
+  const aiCancelPoll = useRef<(() => void) | null>(null);
+
+  const activeAiTask: Task | null = useTaskStore((s) => (aiTaskId ? s.active[aiTaskId] ?? null : null));
+
+  useEffect(() => {
+    if (!aiTaskId) return;
+    if (!activeAiTask) return;
+    if (activeAiTask.status === "success") {
+      aiCancelPoll.current?.();
+      aiCancelPoll.current = null;
+      api.get<{ download_url: string; original_filename: string; mime_type: string; size_bytes: number }>(
+        `/tasks/${aiTaskId}/result`,
+      ).then(
+        (r) => session.applyExternalResult(r.data),
+        (err) => setAiError(err?.response?.data?.detail ?? "Failed to fetch result"),
+      );
+      setAiTaskId(null);
+    } else if (activeAiTask.status === "failed") {
+      aiCancelPoll.current?.();
+      aiCancelPoll.current = null;
+      setAiError(activeAiTask.error_message ?? "AI task failed");
+      setAiTaskId(null);
+    }
+  }, [aiTaskId, activeAiTask, session]);
+
+  useEffect(() => () => aiCancelPoll.current?.(), []);
+
+  const currentParams = useMemo(
+    () => (tab === "ai" ? null : (params[tab as keyof Params] as Record<string, unknown>)),
+    [params, tab],
+  );
+
+  useEffect(() => {
+    if (session.sessionId && tab !== "ai" && currentParams) {
+      session.requestPreview(tab as EnhanceOp, currentParams);
+    }
+  }, [session.sessionId, tab, currentParams, session]);
+
+  const updateParam = useCallback(
+    <K extends keyof Params>(which: K, patch: Partial<Params[K]>) => {
+      setParams((prev) => ({ ...prev, [which]: { ...prev[which], ...patch } }));
+    },
+    [],
+  );
+
+  const onApply = async () => {
+    if (tab === "ai" || !currentParams) return;
+
+    if (tab === "deblur") {
+      setAiError(null);
+      try {
+        const { data } = await api.post<{ task_id?: string; download_url?: string }>(
+          "/image/enhance/deblur/session",
+          {
+            session_id: session.sessionId,
+            operation: "deblur",
+            params: currentParams,
+          },
+        );
+        if (data.task_id) {
+          setAiTaskId(data.task_id);
+          aiCancelPoll.current = useTaskStore.getState().pollTask(data.task_id, 1500);
+        } else if (data.download_url) {
+          session.applyExternalResult(data as any);
+        }
+      } catch (err: unknown) {
+        setAiError(
+          (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+            "Deblur failed",
+        );
+      }
+      return;
+    }
+
+    session.apply(tab as EnhanceOp, currentParams);
+  };
+
+  const onApplyAI = async () => {
+    if (!session.sessionId) return;
+    setAiError(null);
+    setAiSubmitting(true);
+    try {
+      let endpoint = "/image/enhance/super-res/session";
+      let aiParams: Record<string, unknown> = { scale: srScale };
+
+      if (aiMode === "lowlight") {
+        endpoint = "/image/enhance/lowlight/session";
+        aiParams = { strength: lowlightStrength };
+      } else if (aiMode === "denoise-ai") {
+        endpoint = "/image/enhance/denoise-ai/session";
+        aiParams = { h: params["denoise-ai"].h };
+      }
+
+      const { data } = await api.post<{ task_id: string }>(endpoint, {
+        session_id: session.sessionId,
+        operation: aiMode,
+        params: aiParams,
+      });
+      setAiTaskId(data.task_id);
+      aiCancelPoll.current = useTaskStore.getState().pollTask(data.task_id, 1500);
+    } catch (err: unknown) {
+      setAiError(
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+          "Failed to start AI task",
+      );
+    } finally {
+      setAiSubmitting(false);
+    }
+  };
+
+  const onReset = () => {
+    setParams(DEFAULTS);
+    setAiTaskId(null);
+    setAiError(null);
+    aiCancelPoll.current?.();
+    session.reset();
+  };
+
+  return (
+    <SafeAreaView style={styles.container} edges={["bottom"]}>
+      <Stack.Screen options={{ title: "Enhance Image" }} />
+      <ScrollView contentContainerStyle={styles.scroll}>
+        {!session.originalUri ? (
+          <FileUploader
+            accept="image"
+            onFilePicked={(f: PickedFile) => session.upload(f)}
+            label={session.uploading ? "Uploading..." : "Pick an image"}
+          />
+        ) : (
+          <>
+            <BeforeAfterSlider
+              beforeUri={session.originalUri}
+              afterUri={session.previewUri ?? session.originalUri}
+              aspectRatio={session.width / Math.max(1, session.height)}
+            />
+            <View style={styles.statusRow}>
+              {session.previewing && <ActivityIndicator size="small" />}
+              <Text variant="bodySmall" style={styles.statusText}>
+                {session.previewing ? "Generating preview..." : "Drag divider to compare"}
+              </Text>
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
+              {OPS.map((o) => (
+                <Chip key={o.key} icon={o.icon} selected={tab === o.key} onPress={() => setTab(o.key)} style={styles.tab}>
+                  {o.label}
+                </Chip>
+              ))}
+            </ScrollView>
+
+            <View style={styles.controls}>
+              {tab === "clahe" && <ClaheControls value={params.clahe} onChange={(p) => updateParam("clahe", p)} />}
+              {tab === "contrast" && <ContrastControls value={params.contrast} onChange={(p) => updateParam("contrast", p)} />}
+              {tab === "sharpen" && <SharpenControls value={params.sharpen} onChange={(p) => updateParam("sharpen", p)} />}
+              {tab === "denoise" && <DenoiseControls value={params.denoise} onChange={(p) => updateParam("denoise", p)} />}
+              {tab === "deblur" && <DeblurControls value={params.deblur} onChange={(p) => updateParam("deblur", p)} />}
+              {tab === "homomorphic" && <HomomorphicControls value={params.homomorphic} onChange={(p) => updateParam("homomorphic", p)} />}
+              {tab === "edges" && <EdgeControls value={params.edges} onChange={(p) => updateParam("edges", p)} />}
+              {tab === "ai" && (
+                <AiControls
+                  mode={aiMode}
+                  onModeChange={setAiMode}
+                  srScale={srScale}
+                  onSrScale={setSrScale}
+                  strength={lowlightStrength}
+                  onStrength={setLowlightStrength}
+                  denoiseH={params["denoise-ai"].h}
+                  onDenoiseH={(h) => updateParam("denoise-ai", { h })}
+                />
+              )}
+            </View>
+
+            {activeAiTask && aiTaskId && (
+              <View style={styles.section}>
+                <TaskProgressCard task={activeAiTask} title={aiMode === "super-res" ? "Super-resolution" : "Low-light enhance"} />
+              </View>
+            )}
+
+            {(session.error || aiError) && (
+              <HelperText type="error" visible>{session.error ?? aiError}</HelperText>
+            )}
+
+            {session.result && (
+              <View style={styles.resultSection}>
+                <Text variant="titleMedium" style={styles.resultTitle}>Saved</Text>
+                <ResultViewer
+                  filename={session.result.original_filename}
+                  mimeType={session.result.mime_type}
+                  sizeBytes={session.result.size_bytes}
+                  downloadUrl={session.result.download_url}
+                />
+              </View>
+            )}
+
+            <View style={styles.actions}>
+              <Button mode="outlined" onPress={onReset} disabled={session.applying || aiSubmitting}>Reset</Button>
+              {tab === "ai" ? (
+                <Button
+                  mode="contained"
+                  icon="auto-fix"
+                  onPress={onApplyAI}
+                  loading={aiSubmitting || !!activeAiTask}
+                  disabled={aiSubmitting || !!activeAiTask}
+                  style={styles.apply}
+                >
+                  Run AI
+                </Button>
+              ) : (
+                <Button
+                  mode="contained"
+                  onPress={onApply}
+                  loading={session.applying}
+                  disabled={session.applying}
+                  style={styles.apply}
+                >
+                  Apply & Save
+                </Button>
+              )}
+            </View>
+          </>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function LabeledSlider({
+  label, value, min, max, step, onChange, displayValue,
+}: {
+  label: string; value: number; min: number; max: number; step: number;
+  onChange: (v: number) => void; displayValue?: string;
+}) {
+  return (
+    <View style={styles.sliderBlock}>
+      <View style={styles.sliderLabelRow}>
+        <Text variant="bodyMedium">{label}</Text>
+        <Text variant="bodySmall" style={styles.sliderValue}>{displayValue ?? value.toFixed(2)}</Text>
+      </View>
+      <Slider minimumValue={min} maximumValue={max} step={step} value={value} onValueChange={onChange} />
+    </View>
+  );
+}
+
+function ClaheControls({ value, onChange }: { value: Params["clahe"]; onChange: (p: Partial<Params["clahe"]>) => void }) {
+  return (
+    <>
+      <LabeledSlider label="Clip limit" min={0.5} max={10} step={0.1} value={value.clip_limit} onChange={(v) => onChange({ clip_limit: v })} />
+      <LabeledSlider label="Tile size" min={2} max={16} step={1} value={value.tile_size} onChange={(v) => onChange({ tile_size: Math.round(v) })} displayValue={`${value.tile_size}×${value.tile_size}`} />
+    </>
+  );
+}
+
+function ContrastControls({ value, onChange }: { value: Params["contrast"]; onChange: (p: Partial<Params["contrast"]>) => void }) {
+  return (
+    <>
+      <LabeledSlider label="Contrast" min={-100} max={100} step={1} value={value.contrast_pct} onChange={(v) => onChange({ contrast_pct: Math.round(v) })} displayValue={`${value.contrast_pct > 0 ? "+" : ""}${value.contrast_pct}`} />
+      <LabeledSlider label="Brightness" min={-100} max={100} step={1} value={value.brightness} onChange={(v) => onChange({ brightness: Math.round(v) })} displayValue={`${value.brightness > 0 ? "+" : ""}${value.brightness}`} />
+    </>
+  );
+}
+
+function SharpenControls({ value, onChange }: { value: Params["sharpen"]; onChange: (p: Partial<Params["sharpen"]>) => void }) {
+  return (
+    <>
+      <LabeledSlider label="Strength" min={0} max={3} step={0.1} value={value.strength} onChange={(v) => onChange({ strength: v })} />
+      <LabeledSlider label="Radius" min={0.5} max={5} step={0.1} value={value.radius} onChange={(v) => onChange({ radius: v })} />
+    </>
+  );
+}
+
+function DenoiseControls({ value, onChange }: { value: Params["denoise"]; onChange: (p: Partial<Params["denoise"]>) => void }) {
+  const filters: { value: Params["denoise"]["filter_type"]; label: string }[] = [
+    { value: "median", label: "Median" },
+    { value: "gaussian", label: "Gaussian" },
+    { value: "bilateral", label: "Bilateral" },
+  ];
+  return (
+    <>
+      <Text variant="bodyMedium" style={styles.groupLabel}>Filter</Text>
+      <SegmentedButtons value={value.filter_type} onValueChange={(v) => onChange({ filter_type: v as Params["denoise"]["filter_type"] })} buttons={filters} />
+      <LabeledSlider label="Kernel size (odd)" min={3} max={15} step={2} value={value.kernel_size} onChange={(v) => onChange({ kernel_size: Math.round(v) })} displayValue={`${value.kernel_size}px`} />
+    </>
+  );
+}
+
+function EdgeControls({ value, onChange }: { value: Params["edges"]; onChange: (p: Partial<Params["edges"]>) => void }) {
+  const operators: { value: Params["edges"]["operator"]; label: string }[] = [
+    { value: "canny", label: "Canny" },
+    { value: "sobel", label: "Sobel" },
+    { value: "prewitt", label: "Prewitt" },
+  ];
+  return (
+    <>
+      <Text variant="bodyMedium" style={styles.groupLabel}>Operator</Text>
+      <SegmentedButtons value={value.operator} onValueChange={(v) => onChange({ operator: v as Params["edges"]["operator"] })} buttons={operators} />
+      {value.operator === "canny" && (
+        <>
+          <LabeledSlider label="Low threshold" min={0} max={500} step={5} value={value.low_thresh} onChange={(v) => onChange({ low_thresh: Math.round(v) })} />
+          <LabeledSlider label="High threshold" min={0} max={500} step={5} value={value.high_thresh} onChange={(v) => onChange({ high_thresh: Math.round(v) })} />
+        </>
+      )}
+    </>
+  );
+}
+
+function DeblurControls({ value, onChange }: { value: Params["deblur"]; onChange: (p: Partial<Params["deblur"]>) => void }) {
+  const types: { value: Params["deblur"]["blur_type"]; label: string }[] = [
+    { value: "motion", label: "Motion" },
+    { value: "defocus", label: "Defocus" },
+  ];
+  return (
+    <>
+      <Text variant="bodyMedium" style={styles.groupLabel}>Blur Model</Text>
+      <SegmentedButtons value={value.blur_type} onValueChange={(v) => onChange({ blur_type: v as any })} buttons={types} />
+      <LabeledSlider label="Kernel size" min={3} max={51} step={2} value={value.kernel_size} onChange={(v) => onChange({ kernel_size: Math.round(v) })} displayValue={`${value.kernel_size}px`} />
+      <LabeledSlider label="Noise-to-Signal ratio" min={0.001} max={0.1} step={0.001} value={value.noise_power} onChange={(v) => onChange({ noise_power: v })} />
+    </>
+  );
+}
+
+function HomomorphicControls({ value, onChange }: { value: Params["homomorphic"]; onChange: (p: Partial<Params["homomorphic"]>) => void }) {
+  return (
+    <>
+      <LabeledSlider label="Shadow boost (gamma low)" min={0.1} max={1.0} step={0.05} value={value.gamma_low} onChange={(v) => onChange({ gamma_low: v })} />
+      <LabeledSlider label="Highlight suppression (gamma high)" min={1.0} max={4.0} step={0.1} value={value.gamma_high} onChange={(v) => onChange({ gamma_high: v })} />
+      <LabeledSlider label="Cutoff frequency" min={1} max={100} step={1} value={value.cutoff} onChange={(v) => onChange({ cutoff: v })} displayValue={value.cutoff.toFixed(0)} />
+    </>
+  );
+}
+
+function AiControls({
+  mode, onModeChange, srScale, onSrScale, strength, onStrength, denoiseH, onDenoiseH,
+}: {
+  mode: AiMode;
+  onModeChange: (m: AiMode) => void;
+  srScale: 2 | 3 | 4;
+  onSrScale: (s: 2 | 3 | 4) => void;
+  strength: number;
+  onStrength: (s: number) => void;
+  denoiseH: number;
+  onDenoiseH: (h: number) => void;
+}) {
+  return (
+    <>
+      <Text variant="bodyMedium" style={styles.groupLabel}>AI features</Text>
+      <SegmentedButtons
+        value={mode}
+        onValueChange={(v) => onModeChange(v as AiMode)}
+        buttons={[
+          { value: "super-res", label: "Upscale" },
+          { value: "lowlight", label: "Lowlight" },
+          { value: "denoise-ai", label: "NLM Denoise" },
+        ]}
+      />
+      {mode === "super-res" && (
+        <View style={styles.scaleRow}>
+          {[2, 3, 4].map((s) => (
+            <Chip key={s} selected={srScale === s} onPress={() => onSrScale(s as 2 | 3 | 4)}>
+              {s}×
+            </Chip>
+          ))}
+        </View>
+      )}
+      {mode === "lowlight" && (
+        <LabeledSlider label="Enhancement strength" min={0} max={2} step={0.05} value={strength} onChange={onStrength} />
+      )}
+      {mode === "denoise-ai" && (
+        <LabeledSlider label="Filter strength (h)" min={1} max={20} step={1} value={denoiseH} onChange={onDenoiseH} />
+      )}
+      <Text variant="bodySmall" style={styles.hint}>
+        Runs in the background. Progress appears below; result is saved to your task history.
+      </Text>
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  scroll: { padding: 16, gap: 12 },
+  statusRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 },
+  statusText: { color: "#6B7280" },
+  tabsRow: { gap: 8, paddingVertical: 8 },
+  tab: {},
+  controls: { gap: 12 },
+  sliderBlock: { gap: 4 },
+  sliderLabelRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  sliderValue: { color: "#4F46E5", fontVariant: ["tabular-nums"], fontWeight: "700" },
+  groupLabel: { marginTop: 4 },
+  scaleRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  hint: { color: "#6B7280", marginTop: 8 },
+  section: { marginTop: 8 },
+  resultSection: { marginTop: 12 },
+  resultTitle: { fontWeight: "700", marginBottom: 8 },
+  actions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 8 },
+  apply: { minWidth: 140 },
+});
