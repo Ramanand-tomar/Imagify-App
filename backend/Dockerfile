@@ -1,9 +1,6 @@
-# Build context: repo root (Railway default when no Root Directory is set).
-# Therefore every COPY path is prefixed with `backend/`.
-# In Railway Settings, set:
-#   Dockerfile Path = /backend/Dockerfile
-#   Watch Paths     = /backend/**
-# (leave Root Directory unset)
+# Build context: the `backend/` directory.
+# On Render: render.yaml sets `rootDir: backend`, so the context is already backend/.
+# On Railway: set Root Directory = backend (and Dockerfile Path = Dockerfile).
 
 FROM python:3.12-slim
 
@@ -43,13 +40,13 @@ RUN set -eux; \
 WORKDIR /app
 
 # --- Python deps (cacheable layer) ---
-COPY backend/requirements.txt ./requirements.txt
+COPY requirements.txt ./requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # --- App source ---
-COPY backend/alembic.ini ./alembic.ini
-COPY backend/alembic ./alembic
-COPY backend/app ./app
+COPY alembic.ini ./alembic.ini
+COPY alembic ./alembic
+COPY app ./app
 
 EXPOSE 8000
 
