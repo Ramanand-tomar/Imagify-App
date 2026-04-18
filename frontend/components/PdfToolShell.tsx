@@ -1,21 +1,18 @@
-import { Stack } from "expo-router";
 import { ReactNode } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
-import { Button, HelperText, Text } from "react-native-paper";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { StyleSheet, View } from "react-native";
 
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { ResultViewer } from "@/components/ResultViewer";
 import { TaskProgressCard } from "@/components/TaskProgressCard";
+import { AppHeader, Button, Screen, SectionHeader, Text } from "@/components/ui";
 import type { ToolResult } from "@/hooks/usePdfTool";
 import type { Task } from "@/stores/taskStore";
+import { useAppTheme } from "@/theme/useTheme";
 
 interface PdfToolShellProps {
   title: string;
   subtitle?: string;
-  /** UI for picking files + tool-specific options (forms, sliders, inputs) */
   children: ReactNode;
-  /** Submit button label */
   submitLabel?: string;
   onSubmit: () => void;
   canSubmit: boolean;
@@ -38,31 +35,33 @@ export function PdfToolShell({
   canSubmit,
   phase,
   uploadPercent,
-  progress,
   error,
   result,
   activeTask,
   onReset,
 }: PdfToolShellProps) {
+  const theme = useAppTheme();
   const busy = phase === "uploading" || phase === "processing";
 
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
-      <Stack.Screen options={{ title }} />
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {subtitle && <Text variant="bodyMedium" style={styles.subtitle}>{subtitle}</Text>}
+    <>
+      <AppHeader title={title} />
+      <Screen>
+        {subtitle ? (
+          <Text variant="body" tone="secondary">
+            {subtitle}
+          </Text>
+        ) : null}
 
-        <View style={styles.section}>{children}</View>
+        {children}
 
-        {activeTask && phase === "processing" && (
-          <View style={styles.section}>
-            <TaskProgressCard task={activeTask} title={`${title} — in progress`} />
-          </View>
-        )}
+        {activeTask && phase === "processing" ? (
+          <TaskProgressCard task={activeTask} title={`${title} — in progress`} />
+        ) : null}
 
-        {result && (
-          <View style={styles.section}>
-            <Text variant="titleMedium" style={styles.resultTitle}>Result</Text>
+        {result ? (
+          <View style={{ gap: 10 }}>
+            <SectionHeader title="Result" />
             <ResultViewer
               filename={result.original_filename}
               mimeType={result.mime_type}
@@ -70,40 +69,46 @@ export function PdfToolShell({
               downloadUrl={result.download_url}
             />
           </View>
-        )}
+        ) : null}
 
-        {error && <HelperText type="error" visible>{error}</HelperText>}
+        {error ? (
+          <View
+            style={[
+              styles.errorBanner,
+              {
+                backgroundColor: theme.colors.status.errorSoft,
+                borderColor: theme.colors.status.error,
+                borderRadius: theme.radius.md,
+              },
+            ]}
+          >
+            <Text variant="bodySm" tone="error">
+              {error}
+            </Text>
+          </View>
+        ) : null}
 
         <View style={styles.actions}>
           {phase === "success" || phase === "error" ? (
-            <Button mode="contained-tonal" icon="restart" onPress={onReset}>Start over</Button>
+            <Button label="Start over" icon="restart" variant="soft" onPress={onReset} fullWidth />
           ) : (
             <Button
-              mode="contained"
+              label={submitLabel}
               onPress={onSubmit}
               disabled={!canSubmit || busy}
               loading={busy}
-            >
-              {submitLabel}
-            </Button>
+              fullWidth
+              size="lg"
+            />
           )}
         </View>
-      </ScrollView>
-
-      <LoadingOverlay
-        visible={phase === "uploading"}
-        message="Uploading file..."
-        progress={uploadPercent}
-      />
-    </SafeAreaView>
+      </Screen>
+      <LoadingOverlay visible={phase === "uploading"} message="Uploading file..." progress={uploadPercent} />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scroll: { padding: 16 },
-  subtitle: { color: "#6B7280", marginBottom: 12 },
-  section: { marginBottom: 16 },
-  resultTitle: { fontWeight: "700", marginBottom: 8 },
-  actions: { marginTop: 8 },
+  errorBanner: { padding: 12, borderWidth: 1 },
+  actions: { marginTop: 4 },
 });

@@ -1,17 +1,24 @@
 import { useState } from "react";
-import { StyleSheet, View } from "react-native";
-import { Chip, List, Text, TextInput } from "react-native-paper";
+import { View } from "react-native";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
 import { PdfToolShell } from "@/components/PdfToolShell";
+import { ChipGroup, Input, SelectedFileRow, Text } from "@/components/ui";
 import { usePdfTool } from "@/hooks/usePdfTool";
 
 const POSITIONS = [
-  "top-left", "top-center", "top-right",
-  "bottom-left", "bottom-center", "bottom-right",
+  "top-left",
+  "top-center",
+  "top-right",
+  "bottom-left",
+  "bottom-center",
+  "bottom-right",
 ] as const;
-
 type Position = (typeof POSITIONS)[number];
+
+function label(p: Position): string {
+  return p.replace("-", " · ");
+}
 
 export default function PageNumbersScreen() {
   const [file, setFile] = useState<PickedFile | null>(null);
@@ -25,11 +32,10 @@ export default function PageNumbersScreen() {
   return (
     <PdfToolShell
       title="Add Page Numbers"
+      subtitle="Stamp page numbers on every page."
       submitLabel="Add numbers"
       canSubmit={!!file && startValid}
-      onSubmit={() =>
-        file && tool.submit([file], { position, start_number: String(start) })
-      }
+      onSubmit={() => file && tool.submit([file], { position, start_number: String(start) })}
       phase={tool.phase}
       uploadPercent={tool.uploadPercent}
       progress={tool.progress}
@@ -42,44 +48,28 @@ export default function PageNumbersScreen() {
       }}
     >
       {!file ? (
-        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose PDF" />
+        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose a PDF" />
       ) : (
-        <List.Item
-          title={file.name}
-          description={`${(file.size / 1024 / 1024).toFixed(2)} MB`}
-          left={(p) => <List.Icon {...p} icon="file-pdf-box" />}
-          onPress={() => setFile(null)}
-        />
+        <SelectedFileRow name={file.name} sizeBytes={file.size} onRemove={() => setFile(null)} />
       )}
-      <Text variant="titleSmall" style={styles.label}>Position</Text>
-      <View style={styles.grid}>
-        {POSITIONS.map((p) => (
-          <Chip
-            key={p}
-            selected={position === p}
-            onPress={() => setPosition(p)}
-            style={styles.chip}
-          >
-            {p.replace("-", " ")}
-          </Chip>
-        ))}
+
+      <View style={{ gap: 8 }}>
+        <Text variant="titleSm">Position</Text>
+        <ChipGroup
+          wrap
+          value={position}
+          onChange={setPosition}
+          options={POSITIONS.map((p) => ({ value: p, label: label(p) }))}
+        />
       </View>
-      <TextInput
+      <Input
         label="Start number"
         value={startNumber}
         onChangeText={setStartNumber}
         keyboardType="number-pad"
-        mode="outlined"
-        style={styles.field}
-        error={!startValid}
+        leftIcon="numeric"
+        errorText={!startValid ? "Start number must be a positive integer" : undefined}
       />
     </PdfToolShell>
   );
 }
-
-const styles = StyleSheet.create({
-  label: { marginTop: 16, marginBottom: 8 },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: {},
-  field: { marginTop: 16, backgroundColor: "transparent" },
-});

@@ -73,7 +73,10 @@ export async function uploadMultipart<T = unknown>(
   const response = await api.post<T>(path, form, {
     headers: { "Content-Type": "multipart/form-data" },
     onUploadProgress: (e) => {
-      if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+      if (onProgress && e.total) {
+        const pct = Math.round((e.loaded / e.total) * 100);
+        onProgress(Math.min(100, Math.max(0, pct)));
+      }
     },
   });
   return response.data;

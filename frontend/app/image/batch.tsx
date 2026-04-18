@@ -1,18 +1,30 @@
-import { Stack } from "expo-router";
-import React, { useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
-import { Button, Card, HelperText, IconButton, List, SegmentedButtons, Text, TextInput } from "react-native-paper";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useState } from "react";
+import { StyleSheet, View } from "react-native";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { ResultViewer } from "@/components/ResultViewer";
+import {
+  AppHeader,
+  Badge,
+  Button,
+  Card,
+  ChipGroup,
+  Input,
+  ProgressBar,
+  Screen,
+  SectionHeader,
+  SelectedFileRow,
+  Text,
+} from "@/components/ui";
 import { api } from "@/services/api";
 import { useTaskStore, type BatchStatus } from "@/stores/taskStore";
+import { useAppTheme } from "@/theme/useTheme";
 
 type Operation = "compress" | "convert" | "resize" | "histogram" | "denoise";
 
 export default function BatchImageScreen() {
+  const theme = useAppTheme();
   const [files, setFiles] = useState<PickedFile[]>([]);
   const [operation, setOperation] = useState<Operation>("compress");
   const [params, setParams] = useState<Record<string, string>>({
@@ -60,15 +72,10 @@ export default function BatchImageScreen() {
       const formData = new FormData();
       files.forEach((file) => {
         // @ts-ignore
-        formData.append("files", {
-          uri: file.uri,
-          name: file.name,
-          type: file.mimeType,
-        });
+        formData.append("files", { uri: file.uri, name: file.name, type: file.mimeType });
       });
       formData.append("operation", operation);
-      
-      // Clean up params based on operation
+
       const finalParams: Record<string, any> = {};
       if (operation === "compress") finalParams.quality = parseInt(params.quality) || 80;
       if (operation === "convert") {
@@ -80,14 +87,15 @@ export default function BatchImageScreen() {
         if (params.height) finalParams.height = parseInt(params.height);
         finalParams.maintain_ratio = true;
       }
-      // histogram and denoise use defaults or extra params can be added here
-      
       formData.append("params_json", JSON.stringify(finalParams));
 
       const { data } = await api.post("/image/batch", formData, {
         headers: { "Content-Type": "multipart/form-data" },
         onUploadProgress: (ev) => {
-          if (ev.total) setUploadPercent(Math.round((ev.loaded * 100) / ev.total));
+          if (ev.total) {
+            const pct = Math.round((ev.loaded * 100) / ev.total);
+            setUploadPercent(Math.min(100, Math.max(0, pct)));
+          }
         },
       });
 
@@ -111,204 +119,138 @@ export default function BatchImageScreen() {
     setError(null);
   };
 
+  const operationOptions = [
+    { value: "compress" as Operation, label: "Compress" },
+    { value: "convert" as Operation, label: "Convert" },
+    { value: "resize" as Operation, label: "Resize" },
+    { value: "histogram" as Operation, label: "Histogram" },
+    { value: "denoise" as Operation, label: "Denoise" },
+  ];
+
+  const isConfiguring = phase === "idle" || phase === "error";
+  const batchProgress = batchStatus ? batchStatus.completed / batchStatus.total : 0;
+
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
-      <Stack.Screen options={{ title: "Batch Processing" }} />
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <Text variant="bodyMedium" style={styles.subtitle}>
-          Process up to 5 images simultaneously with the same operation.
-        </Text>
+    <>
+      <AppHeader title="Batch Processing" subtitle="Run the same op on up to 5 images" />
+      <Screen>
 
-        {phase === "idle" || phase === "error" ? (
+        {isConfiguring ? (
           <>
-            <View style={styles.section}>
-              <FileUploader accept="image" onFilePicked={addFile} label="Add Images (Max 5)" />
-              {files.length > 0 && (
-                <View style={styles.fileList}>
-                  {files.map((f, i) => (
-                    <List.Item
-                      key={`${f.uri}-${i}`}
-                      title={f.name}
-                      description={`${(f.size / 1024).toFixed(1)} KB`}
-                      left={(p) => <List.Icon {...p} icon="image" />}
-                      right={() => (
-                        <IconButton icon="close" size={20} onPress={() => removeFile(i)} />
-                      )}
-                      style={styles.fileItem}
-                    />
-                  ))}
+            <SectionHeader title="Images" subtitle="Add up to 5" />
+            <FileUploader accept="image" onFilePicked={addFile} label={files.length === 0 ? "Add first image" : "Add another image"} />
+            {files.length > 0 ? (
+              <View style={{ gap: 8 }}>
+                <View style={styles.countRow}>
+                  <Text variant="titleSm" tone="secondary">
+                    Selected
+                  </Text>
+                  <Badge label={`${files.length}/5`} tone={files.length > 0 ? "success" : "neutral"} />
                 </View>
-              )}
-            </View>
+                {files.map((f, i) => (
+                  <SelectedFileRow
+                    key={`${f.uri}-${i}`}
+                    name={f.name}
+                    sizeBytes={f.size}
+                    icon="image-outline"
+                    index={i}
+                    onRemove={() => removeFile(i)}
+                  />
+                ))}
+              </View>
+            ) : null}
 
-            <View style={styles.section}>
-              <Text variant="titleMedium" style={styles.sectionTitle}>Select Operation</Text>
-              <SegmentedButtons
-                value={operation}
-                onValueChange={(v) => setOperation(v as Operation)}
-                buttons={[
-                  { value: "compress", label: "Compress" },
-                  { value: "convert", label: "Convert" },
-                  { value: "resize", label: "Resize" },
-                ]}
-                style={styles.segmented}
-              />
-              <SegmentedButtons
-                value={operation}
-                onValueChange={(v) => setOperation(v as Operation)}
-                buttons={[
-                  { value: "histogram", label: "Histogram" },
-                  { value: "denoise", label: "Denoise" },
-                ]}
-                style={styles.segmented}
-              />
-            </View>
+            <SectionHeader title="Operation" />
+            <ChipGroup wrap value={operation} onChange={setOperation} options={operationOptions} />
 
-            <View style={styles.section}>
-              <Text variant="titleMedium" style={styles.sectionTitle}>Options</Text>
-              {operation === "compress" && (
-                <TextInput
-                  label="Quality (1-100)"
-                  value={params.quality}
-                  onChangeText={(v) => handleUpdateParam("quality", v)}
-                  keyboardType="numeric"
-                  mode="outlined"
-                />
-              )}
-              {operation === "convert" && (
-                <View style={styles.row}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <TextInput
-                      label="Format (jpg, png, webp)"
-                      value={params.format}
-                      onChangeText={(v) => handleUpdateParam("format", v)}
-                      mode="outlined"
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <TextInput
-                      label="Quality"
-                      value={params.quality}
-                      onChangeText={(v) => handleUpdateParam("quality", v)}
-                      keyboardType="numeric"
-                      mode="outlined"
-                    />
-                  </View>
+            <SectionHeader title="Options" />
+            {operation === "compress" ? (
+              <Input label="Quality (1-100)" value={params.quality} onChangeText={(v) => handleUpdateParam("quality", v)} keyboardType="numeric" leftIcon="quality-high" />
+            ) : null}
+            {operation === "convert" ? (
+              <View style={styles.row}>
+                <View style={{ flex: 1 }}>
+                  <Input label="Format" value={params.format} onChangeText={(v) => handleUpdateParam("format", v)} leftIcon="image-sync" helper="jpg · png · webp" />
                 </View>
-              )}
-              {operation === "resize" && (
-                <View style={styles.row}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <TextInput
-                      label="Width"
-                      value={params.width}
-                      onChangeText={(v) => handleUpdateParam("width", v)}
-                      keyboardType="numeric"
-                      mode="outlined"
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <TextInput
-                      label="Height"
-                      value={params.height}
-                      onChangeText={(v) => handleUpdateParam("height", v)}
-                      keyboardType="numeric"
-                      mode="outlined"
-                    />
-                  </View>
+                <View style={{ flex: 1 }}>
+                  <Input label="Quality" value={params.quality} onChangeText={(v) => handleUpdateParam("quality", v)} keyboardType="numeric" />
                 </View>
-              )}
-              {(operation === "histogram" || operation === "denoise") && (
-                <Text variant="bodySmall">No additional parameters required for this operation.</Text>
-              )}
-            </View>
+              </View>
+            ) : null}
+            {operation === "resize" ? (
+              <View style={styles.row}>
+                <View style={{ flex: 1 }}>
+                  <Input label="Width (px)" value={params.width} onChangeText={(v) => handleUpdateParam("width", v)} keyboardType="numeric" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Input label="Height (px)" value={params.height} onChangeText={(v) => handleUpdateParam("height", v)} keyboardType="numeric" />
+                </View>
+              </View>
+            ) : null}
+            {(operation === "histogram" || operation === "denoise") ? (
+              <Card variant="tinted">
+                <Text variant="bodySm" tone="secondary">
+                  No additional parameters required for this operation.
+                </Text>
+              </Card>
+            ) : null}
           </>
         ) : null}
 
-        {phase === "processing" && batchStatus && (
-          <View style={styles.section}>
-            <Card style={styles.statusCard}>
-              <Card.Content>
-                <Text variant="titleMedium">Processing Batch...</Text>
-                <Text variant="bodyMedium">
-                  {batchStatus.completed}/{batchStatus.total} completed
-                  {batchStatus.failed > 0 ? ` (${batchStatus.failed} failed)` : ""}
-                </Text>
-                <View style={styles.progressBarBg}>
-                  <View 
-                    style={[
-                      styles.progressBarFill, 
-                      { width: `${(batchStatus.completed / batchStatus.total) * 100}%` }
-                    ]} 
-                  />
-                </View>
-              </Card.Content>
-            </Card>
-          </View>
-        )}
+        {phase === "processing" && batchStatus ? (
+          <Card variant="tinted">
+            <View style={styles.statusRow}>
+              <Text variant="titleMd">Processing…</Text>
+              <Badge label={`${batchStatus.completed}/${batchStatus.total}`} tone="brand" />
+            </View>
+            {batchStatus.failed > 0 ? (
+              <Text variant="caption" tone="error" style={{ marginTop: 4 }}>
+                {batchStatus.failed} failed
+              </Text>
+            ) : null}
+            <ProgressBar progress={batchProgress} style={{ marginTop: 10 }} />
+          </Card>
+        ) : null}
 
-        {phase === "success" && batchStatus && (
-          <View style={styles.section}>
-            <Text variant="titleLarge" style={styles.resultTitle}>Batch Results</Text>
+        {phase === "success" && batchStatus ? (
+          <View style={{ gap: 10 }}>
+            <SectionHeader title="Results" subtitle={`${batchStatus.results.length} files ready`} />
             {batchStatus.results.map((res) => (
-              <View key={res.task_id} style={{ marginBottom: 12 }}>
-                <ResultViewer
-                  filename={res.original_filename}
-                  mimeType={res.mime_type}
-                  sizeBytes={res.size_bytes}
-                  downloadUrl={res.download_url}
-                />
-              </View>
+              <ResultViewer
+                key={res.task_id}
+                filename={res.original_filename}
+                mimeType={res.mime_type}
+                sizeBytes={res.size_bytes}
+                downloadUrl={res.download_url}
+              />
             ))}
-            <Button mode="contained-tonal" onPress={handleReset} style={styles.resetBtn}>
-              Batch Again
-            </Button>
+            <Button label="Start new batch" icon="restart" variant="soft" onPress={handleReset} fullWidth />
           </View>
-        )}
+        ) : null}
 
-        {error && <HelperText type="error" visible>{error}</HelperText>}
+        {error ? (
+          <View style={[styles.errorBanner, { backgroundColor: theme.colors.status.errorSoft, borderRadius: theme.radius.md }]}>
+            <Text variant="bodySm" tone="error">
+              {error}
+            </Text>
+          </View>
+        ) : null}
 
-        {phase === "idle" && (
-          <Button
-            mode="contained"
-            onPress={handleSubmit}
-            disabled={files.length === 0}
-            style={styles.submitBtn}
-          >
-            Start Batch Process
-          </Button>
-        )}
-
-        {phase === "error" && (
-          <Button mode="contained-tonal" onPress={handleReset} style={styles.submitBtn}>
-            Try Again
-          </Button>
-        )}
-      </ScrollView>
-
-      <LoadingOverlay
-        visible={phase === "uploading"}
-        message={`Uploading ${files.length} files...`}
-        progress={uploadPercent}
-      />
-    </SafeAreaView>
+        {phase === "idle" ? (
+          <Button label="Start batch process" onPress={handleSubmit} disabled={files.length === 0} fullWidth size="lg" />
+        ) : null}
+        {phase === "error" ? (
+          <Button label="Try again" variant="soft" icon="restart" onPress={handleReset} fullWidth />
+        ) : null}
+      </Screen>
+      <LoadingOverlay visible={phase === "uploading"} message={`Uploading ${files.length} files...`} progress={uploadPercent} />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-  scroll: { padding: 16 },
-  subtitle: { color: "#6B7280", marginBottom: 20 },
-  section: { marginBottom: 24 },
-  sectionTitle: { fontWeight: "700", marginBottom: 12 },
-  fileList: { marginTop: 12, backgroundColor: "#F9FAFB", borderRadius: 8 },
-  fileItem: { borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
-  segmented: { marginBottom: 8 },
-  row: { flexDirection: "row" },
-  submitBtn: { marginTop: 8 },
-  resetBtn: { marginTop: 16 },
-  statusCard: { backgroundColor: "#EEF2FF", borderColor: "#C7D2FE", borderWidth: 1 },
-  progressBarBg: { height: 8, backgroundColor: "#E5E7EB", borderRadius: 4, marginTop: 12, overflow: "hidden" },
-  progressBarFill: { height: "100%", backgroundColor: "#4F46E5" },
-  resultTitle: { fontWeight: "700", marginBottom: 16 },
+  row: { flexDirection: "row", gap: 10 },
+  countRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  statusRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  errorBanner: { padding: 12 },
 });

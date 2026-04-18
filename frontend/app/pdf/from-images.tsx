@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { Button, Chip, List, Text } from "react-native-paper";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
 import { PdfToolShell } from "@/components/PdfToolShell";
+import { Badge, ChipGroup, SelectedFileRow, Text } from "@/components/ui";
 import { usePdfTool } from "@/hooks/usePdfTool";
 
 type PageSize = "A4" | "Letter" | "fit";
@@ -34,36 +34,46 @@ export default function FromImagesScreen() {
         tool.reset();
       }}
     >
-      <FileUploader accept="image" onFilePicked={add} label="Add image" />
-      {files.length > 0 && (
+      <FileUploader accept="image" onFilePicked={add} label={files.length === 0 ? "Add first image" : "Add another image"} />
+
+      {files.length > 0 ? (
         <View style={styles.list}>
+          <View style={styles.countRow}>
+            <Text variant="titleSm" tone="secondary">
+              Images to include
+            </Text>
+            <Badge label={`${files.length}/50`} tone={files.length >= 1 ? "success" : "neutral"} />
+          </View>
           {files.map((f, i) => (
-            <List.Item
+            <SelectedFileRow
               key={`${f.uri}-${i}`}
-              title={f.name}
-              description={`${(f.size / 1024 / 1024).toFixed(2)} MB`}
-              left={(p) => <List.Icon {...p} icon="image" />}
-              right={() => <Button compact onPress={() => remove(i)}>✕</Button>}
+              name={f.name}
+              sizeBytes={f.size}
+              icon="image-outline"
+              index={i}
+              onRemove={() => remove(i)}
             />
           ))}
-          <Text variant="bodySmall" style={styles.count}>{files.length}/50 images</Text>
         </View>
-      )}
-      <Text variant="titleSmall" style={styles.label}>Page size</Text>
-      <View style={styles.chips}>
-        {(["A4", "Letter", "fit"] as PageSize[]).map((s) => (
-          <Chip key={s} selected={pageSize === s} onPress={() => setPageSize(s)}>
-            {s === "fit" ? "Fit image" : s}
-          </Chip>
-        ))}
+      ) : null}
+
+      <View style={{ gap: 8 }}>
+        <Text variant="titleSm">Page size</Text>
+        <ChipGroup
+          value={pageSize}
+          onChange={setPageSize}
+          options={[
+            { value: "A4", label: "A4" },
+            { value: "Letter", label: "Letter" },
+            { value: "fit", label: "Fit to image" },
+          ]}
+        />
       </View>
     </PdfToolShell>
   );
 }
 
 const styles = StyleSheet.create({
-  list: { marginTop: 12 },
-  count: { color: "#6B7280", textAlign: "right", marginTop: 4 },
-  label: { marginTop: 16, marginBottom: 8 },
-  chips: { flexDirection: "row", gap: 8 },
+  list: { gap: 8 },
+  countRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
 });

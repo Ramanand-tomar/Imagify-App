@@ -1,14 +1,20 @@
 import { Link } from "expo-router";
 import { useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
-import { Button, HelperText, ProgressBar, Text, TextInput } from "react-native-paper";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Icon } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppLogo, Button, GradientSurface, Input, ProgressBar, Text } from "@/components/ui";
 import { useAuthStore } from "@/stores/authStore";
+import { useAppTheme } from "@/theme/useTheme";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function passwordStrength(pw: string): { score: number; label: string; color: string } {
+function passwordStrength(pw: string): {
+  score: number;
+  label: string;
+  tone: "error" | "warning" | "success" | "brand";
+} {
   let score = 0;
   if (pw.length >= 8) score += 1;
   if (pw.length >= 12) score += 1;
@@ -17,16 +23,17 @@ function passwordStrength(pw: string): { score: number; label: string; color: st
   if (/[^A-Za-z0-9]/.test(pw)) score += 1;
   const bucket = Math.min(4, score);
   const meta = [
-    { label: "Very weak", color: "#EF4444" },
-    { label: "Weak", color: "#F59E0B" },
-    { label: "Fair", color: "#EAB308" },
-    { label: "Good", color: "#10B981" },
-    { label: "Strong", color: "#059669" },
+    { label: "Very weak", tone: "error" as const },
+    { label: "Weak", tone: "error" as const },
+    { label: "Fair", tone: "warning" as const },
+    { label: "Good", tone: "success" as const },
+    { label: "Strong", tone: "success" as const },
   ][bucket];
   return { score: bucket / 4, ...meta };
 }
 
 export default function RegisterScreen() {
+  const theme = useAppTheme();
   const register = useAuthStore((s) => s.register);
 
   const [fullName, setFullName] = useState("");
@@ -35,6 +42,7 @@ export default function RegisterScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const strength = useMemo(() => passwordStrength(password), [password]);
 
@@ -57,95 +65,112 @@ export default function RegisterScreen() {
     }
   };
 
+  const strengthProgressTone: "error" | "warning" | "success" | "brand" =
+    strength.tone === "error" ? "error" : strength.tone === "warning" ? "warning" : "success";
+
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.flex}
-      >
-        <View style={styles.inner}>
-          <Text variant="headlineMedium" style={styles.title}>Create account</Text>
-          <Text variant="bodyMedium" style={styles.subtitle}>Start processing files with Imagify AI</Text>
-
-          <TextInput
-            label="Full name"
-            value={fullName}
-            onChangeText={setFullName}
-            mode="outlined"
-            style={styles.field}
-            error={!!fullNameError}
-          />
-          <HelperText type="error" visible={!!fullNameError}>{fullNameError}</HelperText>
-
-          <TextInput
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            mode="outlined"
-            style={styles.field}
-            error={!!emailError}
-          />
-          <HelperText type="error" visible={!!emailError}>{emailError}</HelperText>
-
-          <TextInput
-            label="Password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            mode="outlined"
-            style={styles.field}
-            error={!!passwordError}
-          />
-          {password.length > 0 && (
-            <View style={styles.strengthRow}>
-              <ProgressBar progress={strength.score} color={strength.color} style={styles.strengthBar} />
-              <Text variant="bodySmall" style={[styles.strengthLabel, { color: strength.color }]}>
-                {strength.label}
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.surface.background }]} edges={["bottom"]}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+          <GradientSurface radius="3xl" contentStyle={styles.hero}>
+            <View style={styles.brandRow}>
+              <AppLogo size={40} variant="gradient" />
+              <Text variant="titleLg" style={{ color: "#FFFFFF" }}>
+                Imagify AI
               </Text>
             </View>
-          )}
-          <HelperText type="error" visible={!!passwordError}>{passwordError}</HelperText>
+            <Text variant="h1" style={{ color: "#FFFFFF", marginTop: 20 }}>
+              Create account
+            </Text>
+            <Text variant="body" style={{ color: "rgba(255,255,255,0.85)", marginTop: 4 }}>
+              Start processing files with AI tools
+            </Text>
+          </GradientSurface>
 
-          {serverError && (
-            <HelperText type="error" visible style={styles.serverError}>{serverError}</HelperText>
-          )}
+          <View style={styles.form}>
+            <Input label="Full name" value={fullName} onChangeText={setFullName} leftIcon="account-outline" errorText={fullNameError} />
+            <Input
+              label="Email"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              leftIcon="email-outline"
+              errorText={emailError}
+            />
+            <Input
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              leftIcon="lock-outline"
+              rightIcon={showPassword ? "eye-off-outline" : "eye-outline"}
+              onRightIconPress={() => setShowPassword((s) => !s)}
+              errorText={passwordError}
+            />
 
-          <Button
-            mode="contained"
-            onPress={onSubmit}
-            loading={submitting}
-            disabled={submitting}
-            style={styles.submit}
-          >
-            Create account
-          </Button>
+            {password.length > 0 ? (
+              <View style={styles.strengthRow}>
+                <View style={{ flex: 1 }}>
+                  <ProgressBar progress={strength.score} tone={strengthProgressTone} />
+                </View>
+                <Text variant="caption" tone={strength.tone === "error" ? "error" : strength.tone === "warning" ? "warning" : "success"} weight="600">
+                  {strength.label}
+                </Text>
+              </View>
+            ) : null}
 
-          <View style={styles.footer}>
-            <Text variant="bodyMedium">Already have an account? </Text>
-            <Link href="/auth/login">
-              <Text variant="bodyMedium" style={styles.link}>Sign in</Text>
-            </Link>
+            {serverError ? (
+              <View
+                style={[
+                  styles.errorBanner,
+                  { backgroundColor: theme.colors.status.errorSoft, borderRadius: theme.radius.md },
+                ]}
+              >
+                <Icon source="alert-circle-outline" size={18} color={theme.colors.status.error} />
+                <Text variant="bodySm" tone="error" style={{ flex: 1 }}>
+                  {serverError}
+                </Text>
+              </View>
+            ) : null}
+
+            <Button label="Create account" onPress={onSubmit} loading={submitting} disabled={submitting} fullWidth size="lg" style={{ marginTop: 4 }} />
+
+            <View style={styles.footer}>
+              <Text variant="body" tone="secondary">
+                Already have an account?{" "}
+              </Text>
+              <Link href="/auth/login" asChild>
+                <Pressable hitSlop={6}>
+                  <Text variant="body" tone="brand" weight="600">
+                    Sign in
+                  </Text>
+                </Pressable>
+              </Link>
+            </View>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F9FAFB" },
+  container: { flex: 1 },
   flex: { flex: 1 },
-  inner: { flex: 1, padding: 24, justifyContent: "center" },
-  title: { fontWeight: "700", marginBottom: 4 },
-  subtitle: { color: "#6B7280", marginBottom: 24 },
-  field: { backgroundColor: "transparent" },
-  submit: { marginTop: 8, paddingVertical: 6 },
-  footer: { flexDirection: "row", justifyContent: "center", marginTop: 24 },
-  link: { fontWeight: "600", color: "#4F46E5" },
-  strengthRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 },
-  strengthBar: { flex: 1, height: 6, borderRadius: 3 },
-  strengthLabel: { width: 72, textAlign: "right" },
-  serverError: { textAlign: "center" },
+  scroll: { padding: 20, gap: 20, flexGrow: 1, justifyContent: "center" },
+  hero: { padding: 24, minHeight: 180 },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  brandMark: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  form: { gap: 12 },
+  strengthRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: -4 },
+  errorBanner: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12 },
+  footer: { flexDirection: "row", justifyContent: "center", marginTop: 16 },
 });

@@ -8,7 +8,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services import storage_service
+from app.api.tasks import download_url_for
 from app.dependencies import get_current_user, get_db
 from app.models.task import TaskType
 from app.models.user import User
@@ -189,7 +189,7 @@ async def process(
     h, w = result_img.shape[:2]
     return ScannerResultOut(
         task_id=task.id,
-        download_url=storage_service.get_signed_url(pf.imagekit_file_path, expire_seconds=3600),
+        download_url=download_url_for(task.id),
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,

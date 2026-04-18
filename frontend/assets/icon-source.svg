@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366F1"/>
+      <stop offset="0.55" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FEF3C7"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Full-bleed gradient background (iOS will add corner radius) -->
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#grad)"/>
+
+  <!-- Back photo frame outline -->
+  <rect x="224" y="320" width="416" height="416" rx="80" ry="80"
+        fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="32"/>
+  <!-- Front solid photo frame -->
+  <rect x="320" y="416" width="416" height="416" rx="80" ry="80"
+        fill="#FFFFFF" fill-opacity="0.95"/>
+
+  <!-- Mountain horizon inside front frame -->
+  <path d="M 352 752 L 464 624 L 544 704 L 624 608 L 704 752 Z"
+        fill="#6366F1" opacity="0.92"/>
+  <!-- Sun dot -->
+  <circle cx="640" cy="512" r="36" fill="#8B5CF6" opacity="0.9"/>
+
+  <!-- AI spark (upper-right) -->
+  <path d="M 800 192 L 832 272 L 912 304 L 832 336 L 800 416 L 768 336 L 688 304 L 768 272 Z"
+        fill="url(#spark)"/>
+</svg>

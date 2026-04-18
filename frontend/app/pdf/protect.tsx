@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { List, ProgressBar, Text, TextInput } from "react-native-paper";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
 import { PdfToolShell } from "@/components/PdfToolShell";
+import { Input, ProgressBar, SelectedFileRow, Text } from "@/components/ui";
 import { usePdfTool } from "@/hooks/usePdfTool";
 
-function strength(pw: string): { score: number; label: string; color: string } {
+function strength(pw: string) {
   let s = 0;
   if (pw.length >= 4) s += 1;
   if (pw.length >= 8) s += 1;
@@ -15,11 +15,11 @@ function strength(pw: string): { score: number; label: string; color: string } {
   if (/[^A-Za-z0-9]/.test(pw)) s += 1;
   const bucket = Math.min(4, s);
   const meta = [
-    { label: "Very weak", color: "#EF4444" },
-    { label: "Weak", color: "#F59E0B" },
-    { label: "Fair", color: "#EAB308" },
-    { label: "Good", color: "#10B981" },
-    { label: "Strong", color: "#059669" },
+    { label: "Very weak", tone: "error" as const },
+    { label: "Weak", tone: "error" as const },
+    { label: "Fair", tone: "warning" as const },
+    { label: "Good", tone: "success" as const },
+    { label: "Strong", tone: "success" as const },
   ][bucket];
   return { score: bucket / 4, ...meta };
 }
@@ -27,6 +27,7 @@ function strength(pw: string): { score: number; label: string; color: string } {
 export default function ProtectScreen() {
   const [file, setFile] = useState<PickedFile | null>(null);
   const [password, setPassword] = useState("");
+  const [show, setShow] = useState(false);
   const tool = usePdfTool({ endpoint: "/pdf/protect", asyncTask: false });
   const st = useMemo(() => strength(password), [password]);
 
@@ -50,36 +51,42 @@ export default function ProtectScreen() {
       }}
     >
       {!file ? (
-        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose PDF" />
+        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose a PDF" />
       ) : (
-        <List.Item
-          title={file.name}
-          description={`${(file.size / 1024 / 1024).toFixed(2)} MB`}
-          left={(p) => <List.Icon {...p} icon="file-pdf-box" />}
-          onPress={() => setFile(null)}
-        />
+        <SelectedFileRow name={file.name} sizeBytes={file.size} onRemove={() => setFile(null)} />
       )}
-      <TextInput
+
+      <Input
         label="Password"
         value={password}
         onChangeText={setPassword}
-        secureTextEntry
-        mode="outlined"
-        style={styles.field}
+        secureTextEntry={!show}
+        leftIcon="lock-outline"
+        rightIcon={show ? "eye-off-outline" : "eye-outline"}
+        onRightIconPress={() => setShow((s) => !s)}
       />
-      {password.length > 0 && (
+
+      {password.length > 0 ? (
         <View style={styles.strengthRow}>
-          <ProgressBar progress={st.score} color={st.color} style={styles.bar} />
-          <Text variant="bodySmall" style={[styles.label, { color: st.color }]}>{st.label}</Text>
+          <View style={{ flex: 1 }}>
+            <ProgressBar
+              progress={st.score}
+              tone={st.tone === "error" ? "error" : st.tone === "warning" ? "warning" : "success"}
+            />
+          </View>
+          <Text
+            variant="caption"
+            tone={st.tone}
+            weight="600"
+          >
+            {st.label}
+          </Text>
         </View>
-      )}
+      ) : null}
     </PdfToolShell>
   );
 }
 
 const styles = StyleSheet.create({
-  field: { marginTop: 16, backgroundColor: "transparent" },
-  strengthRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 },
-  bar: { flex: 1, height: 6, borderRadius: 3 },
-  label: { width: 80, textAlign: "right" },
+  strengthRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: -4 },
 });

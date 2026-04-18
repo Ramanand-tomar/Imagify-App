@@ -1,12 +1,14 @@
 import { useRouter } from "expo-router";
-import { StyleSheet, View } from "react-native";
-import { Card, Divider, Icon, Text } from "react-native-paper";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Pressable, StyleSheet, View } from "react-native";
+import { Icon } from "react-native-paper";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
+import { Card, GradientSurface, Screen, SectionHeader, Text } from "@/components/ui";
 import { useScannerStore } from "@/stores/scannerStore";
+import { useAppTheme } from "@/theme/useTheme";
 
 export default function ScannerTabScreen() {
+  const theme = useAppTheme();
   const router = useRouter();
   const setPendingFile = useScannerStore((s) => s.setPendingFile);
 
@@ -16,53 +18,71 @@ export default function ScannerTabScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
-      <View style={styles.inner}>
-        <Text variant="headlineSmall" style={styles.title}>Document Scanner</Text>
-        <Text variant="bodyMedium" style={styles.subtitle}>
-          Take a photo of a document or pick one from your gallery. The app will auto-detect
-          the edges and let you fine-tune before flattening and exporting.
+    <Screen edges={["top"]}>
+      <View>
+        <Text variant="h1">Scanner</Text>
+        <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
+          Capture documents and extract text
         </Text>
-
-        <Card style={styles.tipCard}>
-          <Card.Content style={styles.tipRow}>
-            <Icon source="lightbulb-outline" size={22} color="#4F46E5" />
-            <Text variant="bodySmall" style={styles.tipText}>
-              For best results: good lighting, plain background, and keep the whole document in frame.
-            </Text>
-          </Card.Content>
-        </Card>
-
-        <FileUploader accept="image" onFilePicked={onFilePicked} label="Capture or pick a document" />
-
-        <Divider style={{ marginVertical: 8 }} />
-
-        <Card style={styles.ocrCard} onPress={() => router.push("/scanner/ocr")}>
-          <Card.Content style={styles.ocrRow}>
-            <View style={styles.ocrIconBg}>
-              <Icon source="text-recognition" size={24} color="#fff" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text variant="titleMedium" style={{ fontWeight: '600' }}>OCR Mode</Text>
-              <Text variant="bodySmall" style={{ color: '#6B7280' }}>Extract text from images or PDFs</Text>
-            </View>
-            <Icon source="chevron-right" size={24} color="#9CA3AF" />
-          </Card.Content>
-        </Card>
       </View>
-    </SafeAreaView>
+
+      <GradientSurface radius="2xl" colors={theme.gradients.aiGlow} contentStyle={styles.hero}>
+        <View style={styles.heroIcon}>
+          <Icon source="line-scan" size={28} color="#FFFFFF" />
+        </View>
+        <Text variant="h3" style={{ color: "#FFFFFF", marginTop: 14 }}>
+          Turn paper into digital
+        </Text>
+        <Text variant="bodySm" style={{ color: "rgba(255,255,255,0.85)", marginTop: 4 }}>
+          Auto-detect edges, flatten, and export as a clean PDF.
+        </Text>
+      </GradientSurface>
+
+      <SectionHeader title="Scan a document" subtitle="Take a photo or pick from gallery" />
+      <FileUploader accept="image" onFilePicked={onFilePicked} label="Capture or pick a document" />
+
+      <Card variant="tinted" tint={theme.colors.status.infoSoft} radius="lg">
+        <View style={styles.tipRow}>
+          <Icon source="lightbulb-on-outline" size={20} color={theme.colors.brand[700]} />
+          <Text variant="bodySm" tone="primary" style={{ flex: 1 }}>
+            For best results: good lighting, plain background, and keep the whole document in frame.
+          </Text>
+        </View>
+      </Card>
+
+      <SectionHeader title="Other modes" />
+      <Card onPress={() => router.push("/scanner/ocr")}>
+        <View style={styles.ocrRow}>
+          <View style={[styles.ocrIconBg, { backgroundColor: theme.colors.brand[50] }]}>
+            <Icon source="text-recognition" size={22} color={theme.colors.brand[700]} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text variant="titleMd">OCR Mode</Text>
+            <Text variant="bodySm" tone="secondary">
+              Extract text from images or PDFs
+            </Text>
+          </View>
+          <Icon source="chevron-right" size={22} color={theme.colors.text.muted} />
+        </View>
+      </Card>
+    </Screen>
   );
 }
 
+// Silence unused import warning for Pressable (kept for future use)
+void Pressable;
+
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  inner: { padding: 16, gap: 16 },
-  title: { fontWeight: "700" },
-  subtitle: { color: "#6B7280" },
-  tipCard: { backgroundColor: "#EEF2FF" },
-  tipRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  tipText: { flex: 1, color: "#374151" },
-  ocrCard: { backgroundColor: "#fff", elevation: 1, borderRadius: 12 },
-  ocrRow: { flexDirection: "row", alignItems: "center", gap: 16 },
-  ocrIconBg: { backgroundColor: "#4F46E5", padding: 8, borderRadius: 8 },
+  hero: { padding: 20, minHeight: 160 },
+  heroIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tipRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  ocrRow: { flexDirection: "row", alignItems: "center", gap: 14 },
+  ocrIconBg: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center" },
 });

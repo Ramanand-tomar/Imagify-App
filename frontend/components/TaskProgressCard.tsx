@@ -1,67 +1,92 @@
-import { StyleSheet, View } from "react-native";
-import { ActivityIndicator, Card, Icon, ProgressBar, Text } from "react-native-paper";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { Icon } from "react-native-paper";
 
 import type { Task } from "@/stores/taskStore";
+import { Badge, Card, ProgressBar, Text } from "@/components/ui";
+import { useAppTheme } from "@/theme/useTheme";
+import type { BadgeTone } from "@/components/ui";
 
 interface TaskProgressCardProps {
   task: Task;
   title?: string;
 }
 
-function statusMeta(status: Task["status"]) {
+function statusMeta(
+  status: Task["status"],
+): { label: string; tone: BadgeTone; icon: string; progressTone: "brand" | "success" | "warning" | "error" } {
   switch (status) {
     case "pending":
-      return { label: "Queued", color: "#6B7280", icon: "clock-outline" };
+      return { label: "Queued", tone: "neutral", icon: "clock-outline", progressTone: "brand" };
     case "in_progress":
-      return { label: "Processing", color: "#4F46E5", icon: "progress-clock" };
+      return { label: "Processing", tone: "brand", icon: "progress-clock", progressTone: "brand" };
     case "success":
-      return { label: "Done", color: "#059669", icon: "check-circle" };
+      return { label: "Done", tone: "success", icon: "check-circle", progressTone: "success" };
     case "failed":
-      return { label: "Failed", color: "#DC2626", icon: "alert-circle" };
+      return { label: "Failed", tone: "error", icon: "alert-circle", progressTone: "error" };
   }
 }
 
+function formatTaskType(t: Task["task_type"]): string {
+  if (t === "ai") return "AI Enhance";
+  if (t === "ocr") return "OCR";
+  if (t === "pdf") return "PDF task";
+  return "Image task";
+}
+
 export function TaskProgressCard({ task, title }: TaskProgressCardProps) {
+  const theme = useAppTheme();
   const meta = statusMeta(task.status);
-  const pct = task.progress / 100;
+  const pct = Math.max(0, Math.min(1, task.progress / 100));
+  const busy = task.status === "in_progress" || task.status === "pending";
 
   return (
-    <Card style={styles.card}>
-      <Card.Content style={styles.content}>
-        <View style={styles.headerRow}>
-          <View style={styles.iconWrap}>
-            {task.status === "in_progress" || task.status === "pending" ? (
-              <ActivityIndicator size="small" color={meta.color} />
-            ) : (
-              <Icon source={meta.icon} size={22} color={meta.color} />
-            )}
-          </View>
-          <View style={styles.headerText}>
-            <Text variant="titleSmall" numberOfLines={1}>
-              {title ?? `${task.task_type.toUpperCase()} task`}
-            </Text>
-            <Text variant="bodySmall" style={{ color: meta.color }}>{meta.label}</Text>
-          </View>
-          <Text variant="bodySmall" style={styles.percent}>{task.progress}%</Text>
+    <Card variant="elevated" radius="lg">
+      <View style={styles.headerRow}>
+        <View
+          style={[
+            styles.iconWrap,
+            { backgroundColor: theme.colors.brand[50], borderColor: theme.colors.brand[100] },
+          ]}
+        >
+          {busy ? (
+            <ActivityIndicator size="small" color={theme.colors.brand[600]} />
+          ) : (
+            <Icon
+              source={meta.icon}
+              size={20}
+              color={task.status === "success" ? theme.colors.status.success : task.status === "failed" ? theme.colors.status.error : theme.colors.brand[600]}
+            />
+          )}
         </View>
-        <ProgressBar progress={pct} color={meta.color} style={styles.bar} />
-        {task.error_message && (
-          <Text variant="bodySmall" style={styles.error} numberOfLines={2}>
-            {task.error_message}
+        <View style={styles.headerText}>
+          <Text variant="titleMd" numberOfLines={1}>
+            {title ?? formatTaskType(task.task_type)}
           </Text>
-        )}
-      </Card.Content>
+          <Text variant="caption" tone="muted">
+            {task.progress}%
+          </Text>
+        </View>
+        <Badge label={meta.label} tone={meta.tone} />
+      </View>
+      <ProgressBar progress={pct} tone={meta.progressTone} style={{ marginTop: 12 }} />
+      {task.error_message ? (
+        <Text variant="caption" tone="error" style={{ marginTop: 8 }} numberOfLines={2}>
+          {task.error_message}
+        </Text>
+      ) : null}
     </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { marginVertical: 6 },
-  content: { gap: 10 },
   headerRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  iconWrap: { width: 24, alignItems: "center" },
   headerText: { flex: 1 },
-  percent: { color: "#6B7280" },
-  bar: { height: 6, borderRadius: 3 },
-  error: { color: "#DC2626" },
+  iconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
 });

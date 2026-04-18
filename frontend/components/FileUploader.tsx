@@ -1,8 +1,11 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
-import { StyleSheet, View } from "react-native";
-import { Button, HelperText, Text } from "react-native-paper";
+import { Pressable, StyleSheet, View } from "react-native";
+import { Icon } from "react-native-paper";
+
+import { BottomSheet, Text, type SheetAction } from "@/components/ui";
+import { useAppTheme } from "@/theme/useTheme";
 
 export interface PickedFile {
   uri: string;
@@ -12,12 +15,11 @@ export interface PickedFile {
 }
 
 export interface FileUploaderProps {
-  /** Comma list of accepted mime types, e.g. "image/*" or "application/pdf" */
   accept: "image" | "pdf" | "any";
-  /** Max size in bytes. Defaults to 20MB. */
   maxSizeBytes?: number;
   onFilePicked: (file: PickedFile) => void;
   label?: string;
+  sublabel?: string;
 }
 
 const DEFAULT_MAX = 20 * 1024 * 1024;
@@ -26,9 +28,19 @@ export function FileUploader({
   accept,
   maxSizeBytes = DEFAULT_MAX,
   onFilePicked,
-  label = "Choose file",
+  label,
+  sublabel,
 }: FileUploaderProps) {
+  const theme = useAppTheme();
   const [error, setError] = useState<string | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  const displayLabel = label ?? (accept === "pdf" ? "Add a PDF" : accept === "image" ? "Add an image" : "Add a file");
+  const displaySub =
+    sublabel ??
+    (accept === "pdf"
+      ? "Tap to browse your files"
+      : "Choose from camera, gallery, or files");
 
   const validate = (size: number, mime: string): string | null => {
     if (size > maxSizeBytes) return `File exceeds ${Math.round(maxSizeBytes / 1024 / 1024)}MB limit`;
@@ -39,28 +51,21 @@ export function FileUploader({
 
   const pickDocument = async () => {
     setError(null);
-    const mimeFilter =
-      accept === "image" ? ["image/*"] : accept === "pdf" ? ["application/pdf"] : ["*/*"];
+    const mimeFilter = accept === "image" ? ["image/*"] : accept === "pdf" ? ["application/pdf"] : ["*/*"];
     const result = await DocumentPicker.getDocumentAsync({ type: mimeFilter, multiple: false, copyToCacheDirectory: true });
     if (result.canceled || !result.assets?.length) return;
     const asset = result.assets[0];
     const size = asset.size ?? 0;
     const mime = asset.mimeType ?? "application/octet-stream";
     const err = validate(size, mime);
-    if (err) {
-      setError(err);
-      return;
-    }
+    if (err) return setError(err);
     onFilePicked({ uri: asset.uri, name: asset.name, mimeType: mime, size });
   };
 
   const pickFromGallery = async () => {
     setError(null);
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      setError("Permission to access photos denied");
-      return;
-    }
+    if (!perm.granted) return setError("Permission to access photos denied");
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 1,
@@ -70,10 +75,7 @@ export function FileUploader({
     const size = asset.fileSize ?? 0;
     const mime = asset.mimeType ?? "image/jpeg";
     const err = validate(size, mime);
-    if (err) {
-      setError(err);
-      return;
-    }
+    if (err) return setError(err);
     onFilePicked({
       uri: asset.uri,
       name: asset.fileName ?? `upload-${Date.now()}.jpg`,
@@ -85,20 +87,14 @@ export function FileUploader({
   const pickFromCamera = async () => {
     setError(null);
     const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      setError("Camera permission denied");
-      return;
-    }
+    if (!perm.granted) return setError("Camera permission denied");
     const result = await ImagePicker.launchCameraAsync({ quality: 1 });
     if (result.canceled || !result.assets?.length) return;
     const asset = result.assets[0];
     const size = asset.fileSize ?? 0;
     const mime = asset.mimeType ?? "image/jpeg";
     const err = validate(size, mime);
-    if (err) {
-      setError(err);
-      return;
-    }
+    if (err) return setError(err);
     onFilePicked({
       uri: asset.uri,
       name: asset.fileName ?? `camera-${Date.now()}.jpg`,
@@ -107,39 +103,73 @@ export function FileUploader({
     });
   };
 
+  const openPicker = () => {
+    if (accept === "pdf") {
+      pickDocument();
+      return;
+    }
+    setSheetOpen(true);
+  };
+
+  const actions: SheetAction[] = accept === "pdf"
+    ? [{ key: "files", label: "Browse files", icon: "folder-outline", onPress: pickDocument }]
+    : [
+        { key: "camera", label: "Take a photo", description: "Use your camera", icon: "camera-outline", onPress: pickFromCamera },
+        { key: "gallery", label: "Choose from gallery", description: "Recent photos", icon: "image-outline", onPress: pickFromGallery },
+        { key: "files", label: "Browse files", description: "Pick from any app", icon: "folder-outline", onPress: pickDocument },
+      ];
+
   return (
-    <View style={styles.container}>
-      <Text variant="titleMedium" style={styles.label}>{label}</Text>
-      <View style={styles.row}>
-        {accept !== "pdf" && (
-          <>
-            <Button mode="contained-tonal" icon="image" onPress={pickFromGallery} style={styles.btn}>
-              Gallery
-            </Button>
-            <Button mode="contained-tonal" icon="camera" onPress={pickFromCamera} style={styles.btn}>
-              Camera
-            </Button>
-          </>
-        )}
-        <Button mode="contained-tonal" icon="file" onPress={pickDocument} style={styles.btn}>
-          Files
-        </Button>
-      </View>
-      {error && <HelperText type="error" visible>{error}</HelperText>}
-    </View>
+    <>
+      <Pressable
+        onPress={openPicker}
+        style={({ pressed }) => [
+          styles.dropzone,
+          {
+            borderColor: error ? theme.colors.status.error : theme.colors.border.default,
+            backgroundColor: pressed ? theme.colors.brand[50] : theme.colors.surface.card,
+            borderRadius: theme.radius.xl,
+          },
+        ]}
+      >
+        <View style={[styles.iconWrap, { backgroundColor: theme.colors.brand[50] }]}>
+          <Icon source="cloud-upload-outline" size={28} color={theme.colors.brand[700]} />
+        </View>
+        <Text variant="titleMd" align="center">
+          {displayLabel}
+        </Text>
+        <Text variant="bodySm" tone="secondary" align="center">
+          {displaySub}
+        </Text>
+        <Text variant="caption" tone="muted" align="center" style={{ marginTop: 4 }}>
+          Max {Math.round(maxSizeBytes / 1024 / 1024)}MB
+        </Text>
+      </Pressable>
+      {error ? (
+        <Text variant="caption" tone="error" style={{ marginTop: 6 }}>
+          {error}
+        </Text>
+      ) : null}
+      <BottomSheet visible={sheetOpen} onClose={() => setSheetOpen(false)} title="Add file" actions={actions} />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
+  dropzone: {
+    borderWidth: 1.5,
     borderStyle: "dashed",
-    borderRadius: 12,
-    padding: 16,
-    gap: 12,
+    paddingVertical: 28,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    gap: 6,
   },
-  label: { textAlign: "center", color: "#374151" },
-  row: { flexDirection: "row", justifyContent: "center", flexWrap: "wrap", gap: 8 },
-  btn: { marginVertical: 4 },
+  iconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
 });

@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { Button, List, Text } from "react-native-paper";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
 import { PdfToolShell } from "@/components/PdfToolShell";
+import { Badge, SelectedFileRow, Text } from "@/components/ui";
 import { usePdfTool } from "@/hooks/usePdfTool";
 
 export default function MergeScreen() {
@@ -23,7 +23,7 @@ export default function MergeScreen() {
   return (
     <PdfToolShell
       title="Merge PDFs"
-      subtitle="Combine 2–10 PDFs into a single file. Reorder using the arrows."
+      subtitle="Combine 2–10 PDFs into one file. Reorder with the arrows."
       submitLabel={`Merge ${files.length} file${files.length === 1 ? "" : "s"}`}
       canSubmit={files.length >= 2}
       onSubmit={() => tool.submit(files, {})}
@@ -38,34 +38,33 @@ export default function MergeScreen() {
         tool.reset();
       }}
     >
-      <FileUploader accept="pdf" onFilePicked={add} label="Add PDF" />
-      {files.length > 0 && (
+      <FileUploader accept="pdf" onFilePicked={add} label={files.length === 0 ? "Add first PDF" : "Add another PDF"} />
+      {files.length > 0 ? (
         <View style={styles.list}>
+          <View style={styles.countRow}>
+            <Text variant="titleSm" tone="secondary">
+              Files in order
+            </Text>
+            <Badge label={`${files.length}/10`} tone={files.length >= 2 ? "success" : "neutral"} />
+          </View>
           {files.map((f, i) => (
-            <List.Item
+            <SelectedFileRow
               key={`${f.uri}-${i}`}
-              title={f.name}
-              description={`${(f.size / 1024 / 1024).toFixed(2)} MB`}
-              left={(p) => <List.Icon {...p} icon="file-pdf-box" />}
-              right={() => (
-                <View style={styles.row}>
-                  <Button compact onPress={() => moveUp(i)} disabled={i === 0}>↑</Button>
-                  <Button compact onPress={() => remove(i)}>✕</Button>
-                </View>
-              )}
+              name={f.name}
+              sizeBytes={f.size}
+              index={i}
+              onMoveUp={() => moveUp(i)}
+              canMoveUp={i > 0}
+              onRemove={() => remove(i)}
             />
           ))}
-          <Text variant="bodySmall" style={styles.count}>
-            {files.length}/10 files
-          </Text>
         </View>
-      )}
+      ) : null}
     </PdfToolShell>
   );
 }
 
 const styles = StyleSheet.create({
-  list: { marginTop: 12 },
-  row: { flexDirection: "row", alignItems: "center" },
-  count: { color: "#6B7280", textAlign: "right", marginTop: 4 },
+  list: { gap: 8 },
+  countRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
 });

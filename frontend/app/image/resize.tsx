@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { List, Switch, Text, TextInput } from "react-native-paper";
+import { Switch } from "react-native-paper";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
 import { PdfToolShell } from "@/components/PdfToolShell";
+import { Card, Input, SelectedFileRow, Text } from "@/components/ui";
 import { usePdfTool } from "@/hooks/usePdfTool";
+import { useAppTheme } from "@/theme/useTheme";
 
 export default function ImageResizeScreen() {
+  const theme = useAppTheme();
   const [file, setFile] = useState<PickedFile | null>(null);
   const [widthStr, setWidthStr] = useState("");
   const [heightStr, setHeightStr] = useState("");
@@ -48,51 +51,52 @@ export default function ImageResizeScreen() {
       }}
     >
       {!file ? (
-        <FileUploader accept="image" onFilePicked={setFile} label="Choose image" />
+        <FileUploader accept="image" onFilePicked={setFile} label="Choose an image" />
       ) : (
-        <List.Item
-          title={file.name}
-          description={`${(file.size / 1024 / 1024).toFixed(2)} MB · ${file.mimeType}`}
-          left={(p) => <List.Icon {...p} icon="image" />}
-          onPress={() => setFile(null)}
-        />
+        <SelectedFileRow name={file.name} sizeBytes={file.size} icon="image-outline" onRemove={() => setFile(null)} />
       )}
       <View style={styles.row}>
-        <TextInput
-          label="Width (px)"
-          value={widthStr}
-          onChangeText={setWidthStr}
-          keyboardType="number-pad"
-          mode="outlined"
-          style={[styles.field, styles.flex]}
-          error={!widthValid}
-        />
-        <TextInput
-          label="Height (px)"
-          value={heightStr}
-          onChangeText={setHeightStr}
-          keyboardType="number-pad"
-          mode="outlined"
-          style={[styles.field, styles.flex]}
-          error={!heightValid}
-        />
+        <View style={{ flex: 1 }}>
+          <Input
+            label="Width (px)"
+            value={widthStr}
+            onChangeText={setWidthStr}
+            keyboardType="number-pad"
+            leftIcon="arrow-expand-horizontal"
+            errorText={!widthValid ? "1–10000" : undefined}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Input
+            label="Height (px)"
+            value={heightStr}
+            onChangeText={setHeightStr}
+            keyboardType="number-pad"
+            leftIcon="arrow-expand-vertical"
+            errorText={!heightValid ? "1–10000" : undefined}
+          />
+        </View>
       </View>
-      <View style={styles.ratioRow}>
-        <Text variant="bodyMedium">Maintain aspect ratio</Text>
-        <Switch value={maintainRatio} onValueChange={setMaintainRatio} />
-      </View>
+      <Card padded={false}>
+        <View style={styles.ratioRow}>
+          <View style={{ flex: 1 }}>
+            <Text variant="titleMd">Maintain aspect ratio</Text>
+            <Text variant="caption" tone="secondary" style={{ marginTop: 2 }}>
+              Prevents distortion when resizing
+            </Text>
+          </View>
+          <Switch
+            value={maintainRatio}
+            onValueChange={setMaintainRatio}
+            color={theme.colors.brand.default}
+          />
+        </View>
+      </Card>
     </PdfToolShell>
   );
 }
 
 const styles = StyleSheet.create({
-  field: { marginTop: 12, backgroundColor: "transparent" },
-  row: { flexDirection: "row", gap: 8 },
-  flex: { flex: 1 },
-  ratioRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 16,
-  },
+  row: { flexDirection: "row", gap: 10 },
+  ratioRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
 });

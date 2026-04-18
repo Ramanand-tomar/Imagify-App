@@ -1,14 +1,16 @@
 import { useState } from "react";
-import { StyleSheet, View } from "react-native";
-import { Chip, List, Text, TextInput } from "react-native-paper";
+import { View } from "react-native";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
 import { PdfToolShell } from "@/components/PdfToolShell";
+import { ChipGroup, Input, SelectedFileRow, Text } from "@/components/ui";
 import { usePdfTool } from "@/hooks/usePdfTool";
+
+type Angle = "90" | "180" | "270";
 
 export default function RotateScreen() {
   const [file, setFile] = useState<PickedFile | null>(null);
-  const [degrees, setDegrees] = useState<90 | 180 | 270>(90);
+  const [degrees, setDegrees] = useState<Angle>("90");
   const [pages, setPages] = useState("");
   const tool = usePdfTool({ endpoint: "/pdf/rotate", asyncTask: false });
 
@@ -21,7 +23,7 @@ export default function RotateScreen() {
       onSubmit={() =>
         file &&
         tool.submit([file], {
-          degrees: String(degrees),
+          degrees,
           ...(pages.trim() ? { pages: pages.trim() } : {}),
         })
       }
@@ -37,42 +39,29 @@ export default function RotateScreen() {
       }}
     >
       {!file ? (
-        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose PDF" />
+        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose a PDF" />
       ) : (
-        <List.Item
-          title={file.name}
-          description={`${(file.size / 1024 / 1024).toFixed(2)} MB`}
-          left={(p) => <List.Icon {...p} icon="file-pdf-box" />}
-          onPress={() => setFile(null)}
-        />
+        <SelectedFileRow name={file.name} sizeBytes={file.size} onRemove={() => setFile(null)} />
       )}
-      <Text variant="titleSmall" style={styles.label}>Angle</Text>
-      <View style={styles.chips}>
-        {[90, 180, 270].map((d) => (
-          <Chip
-            key={d}
-            selected={degrees === d}
-            onPress={() => setDegrees(d as 90 | 180 | 270)}
-            icon="rotate-right"
-          >
-            {d}°
-          </Chip>
-        ))}
+      <View style={{ gap: 8 }}>
+        <Text variant="titleSm">Angle</Text>
+        <ChipGroup
+          value={degrees}
+          onChange={setDegrees}
+          options={[
+            { value: "90", label: "90°", icon: "rotate-right" },
+            { value: "180", label: "180°", icon: "rotate-right" },
+            { value: "270", label: "270°", icon: "rotate-left" },
+          ]}
+        />
       </View>
-      <TextInput
-        label="Pages (e.g. 1,3,5-7)"
-        placeholder="Leave blank for all pages"
+      <Input
+        label="Pages (optional)"
+        placeholder="e.g. 1,3,5-7 — leave blank for all"
         value={pages}
         onChangeText={setPages}
-        mode="outlined"
-        style={styles.field}
+        leftIcon="format-list-bulleted"
       />
     </PdfToolShell>
   );
 }
-
-const styles = StyleSheet.create({
-  label: { marginTop: 16, marginBottom: 8 },
-  chips: { flexDirection: "row", gap: 8 },
-  field: { marginTop: 16, backgroundColor: "transparent" },
-});

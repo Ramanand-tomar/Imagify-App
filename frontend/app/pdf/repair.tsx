@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { List } from "react-native-paper";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
 import { PdfToolShell } from "@/components/PdfToolShell";
+import { Card, SelectedFileRow, Text } from "@/components/ui";
 import { usePdfTool } from "@/hooks/usePdfTool";
 
 export default function RepairScreen() {
@@ -28,15 +28,19 @@ export default function RepairScreen() {
       }}
     >
       {!file ? (
-        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose PDF" />
+        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose a PDF" />
       ) : (
-        <List.Item
-          title={file.name}
-          description={`${(file.size / 1024 / 1024).toFixed(2)} MB`}
-          left={(p) => <List.Icon {...p} icon="file-pdf-box" />}
-          onPress={() => setFile(null)}
-        />
+        <SelectedFileRow name={file.name} sizeBytes={file.size} onRemove={() => setFile(null)} />
       )}
+      <Card variant="tinted">
+        <Text variant="titleSm" tone="brand">
+          What this does
+        </Text>
+        <Text variant="bodySm" tone="secondary" style={{ marginTop: 6 }}>
+          Attempts to recover text and page structure from PDFs with damaged or partial data. Output
+          may not be byte-identical to the original but should open in standard viewers.
+        </Text>
+      </Card>
     </PdfToolShell>
   );
 }

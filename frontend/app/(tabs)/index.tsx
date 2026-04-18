@@ -1,35 +1,54 @@
-import { useRouter } from "expo-router";
-import { useEffect } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
-import { Card, Icon, Text } from "react-native-paper";
+import { useRouter, type Href } from "expo-router";
+import { useEffect, useState } from "react";
+import { Pressable, StyleSheet, View } from "react-native";
+import { Icon } from "react-native-paper";
 
-import { TaskProgressCard } from "@/components/TaskProgressCard";
-import { useTaskStore } from "@/stores/taskStore";
-import { pingServer } from "@/services/api";
 import { ServerStatusBanner } from "@/components/ServerStatusBanner";
-import { useState } from "react";
+import { TaskProgressCard } from "@/components/TaskProgressCard";
+import {
+  Avatar,
+  EmptyState,
+  GradientSurface,
+  IconTile,
+  Screen,
+  SectionHeader,
+  Text,
+} from "@/components/ui";
+import { pingServer } from "@/services/api";
+import { useAuthStore } from "@/stores/authStore";
+import { useTaskStore } from "@/stores/taskStore";
+import { useAppTheme } from "@/theme/useTheme";
 
 interface FeatureCard {
   key: string;
   title: string;
   subtitle: string;
   icon: string;
-  route: "/(tabs)/pdf" | "/(tabs)/image" | "/(tabs)/scanner";
+  tone: "brand" | "violet" | "cyan" | "emerald" | "amber" | "rose";
+  route: Href;
 }
 
 const features: FeatureCard[] = [
-  { key: "pdf-merge", title: "Merge PDFs", subtitle: "Combine into one", icon: "file-multiple", route: "/(tabs)/pdf" },
-  { key: "pdf-split", title: "Split PDF", subtitle: "Extract pages", icon: "content-cut", route: "/(tabs)/pdf" },
-  { key: "img-compress", title: "Compress", subtitle: "Shrink image size", icon: "image-size-select-small", route: "/(tabs)/image" },
-  { key: "img-convert", title: "Convert", subtitle: "JPG ↔ PNG ↔ WebP", icon: "image-sync", route: "/(tabs)/image" },
-  { key: "scan", title: "Scan Doc", subtitle: "Camera → PDF", icon: "scanner", route: "/(tabs)/scanner" },
-  { key: "ai", title: "AI Enhance", subtitle: "Upscale & restore", icon: "auto-fix", route: "/(tabs)/image" },
+  { key: "pdf-merge", title: "Merge PDFs", subtitle: "Combine files into one", icon: "file-multiple", tone: "brand", route: "/pdf/merge" },
+  { key: "pdf-split", title: "Split PDF", subtitle: "Extract pages", icon: "content-cut", tone: "violet", route: "/pdf/split" },
+  { key: "img-compress", title: "Compress", subtitle: "Shrink image size", icon: "image-size-select-small", tone: "cyan", route: "/image/compress" },
+  { key: "img-convert", title: "Convert", subtitle: "JPG ↔ PNG ↔ WebP", icon: "image-sync", tone: "emerald", route: "/image/convert" },
+  { key: "scan", title: "Scan Doc", subtitle: "Camera → PDF", icon: "line-scan", tone: "amber", route: "/(tabs)/scanner" },
+  { key: "ai", title: "AI Enhance", subtitle: "Upscale & restore", icon: "auto-fix", tone: "rose", route: "/image/enhance" },
 ];
 
+function firstName(input?: string): string {
+  if (!input) return "there";
+  const name = input.trim().split(" ")[0];
+  return name || "there";
+}
+
 export default function HomeScreen() {
+  const theme = useAppTheme();
   const router = useRouter();
   const history = useTaskStore((s) => s.history);
   const loadHistory = useTaskStore((s) => s.loadHistory);
+  const user = useAuthStore((s) => s.user);
   const [wakingUp, setWakingUp] = useState(false);
 
   useEffect(() => {
@@ -44,60 +63,98 @@ export default function HomeScreen() {
     });
 
     loadHistory().catch(() => {});
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [loadHistory]);
 
   return (
-    <View style={styles.flex}>
+    <View style={{ flex: 1, backgroundColor: theme.colors.surface.background }}>
       <ServerStatusBanner visible={wakingUp} />
-      <ScrollView contentContainerStyle={styles.container}>
-      <Card style={styles.banner} onPress={() => router.push("/(tabs)/image")}>
-        <Card.Content style={styles.bannerContent}>
-          <Icon source="star-four-points" size={32} color="#FFF" />
-          <View style={styles.bannerText}>
-            <Text variant="titleMedium" style={styles.bannerTitle}>Try AI Enhancement</Text>
-            <Text variant="bodySmall" style={styles.bannerSub}>Upscale photos up to 4×</Text>
+      <Screen edges={["top"]}>
+        <View style={styles.greetingRow}>
+          <View style={{ flex: 1 }}>
+            <Text variant="caption" tone="secondary">
+              Welcome back
+            </Text>
+            <Text variant="h1" style={{ marginTop: 2 }}>
+              Hi, {firstName(user?.full_name || user?.email)} 👋
+            </Text>
           </View>
-        </Card.Content>
-      </Card>
+          <Pressable onPress={() => router.push("/(tabs)/profile")} hitSlop={8}>
+            <Avatar name={user?.full_name} email={user?.email} size="md" />
+          </Pressable>
+        </View>
 
-      <Text variant="titleMedium" style={styles.section}>Tools</Text>
-      <View style={styles.grid}>
-        {features.map((f) => (
-          <Card key={f.key} style={styles.tile} onPress={() => router.push(f.route)}>
-            <Card.Content style={styles.tileContent}>
-              <Icon source={f.icon} size={32} color="#4F46E5" />
-              <Text variant="titleSmall" style={styles.tileTitle}>{f.title}</Text>
-              <Text variant="bodySmall" style={styles.tileSub}>{f.subtitle}</Text>
-            </Card.Content>
-          </Card>
-        ))}
-      </View>
+        <Pressable onPress={() => router.push("/image/enhance")} style={{ marginTop: 4 }}>
+          <GradientSurface radius="2xl" contentStyle={styles.bannerContent}>
+            <View style={styles.bannerIconWrap}>
+              <Icon source="star-four-points" size={26} color="#FFFFFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text variant="caption" style={{ color: "rgba(255,255,255,0.85)" }}>
+                NEW · AI
+              </Text>
+              <Text variant="h3" style={{ color: "#FFFFFF", marginTop: 2 }}>
+                Try AI Enhancement
+              </Text>
+              <Text variant="bodySm" style={{ color: "rgba(255,255,255,0.85)", marginTop: 2 }}>
+                Upscale photos up to 4× and restore details
+              </Text>
+            </View>
+            <Icon source="chevron-right" size={22} color="#FFFFFF" />
+          </GradientSurface>
+        </Pressable>
 
-      <Text variant="titleMedium" style={styles.section}>Recent tasks</Text>
-      {history.length === 0 ? (
-        <Text variant="bodyMedium" style={styles.empty}>No tasks yet. Pick a tool above to get started.</Text>
-      ) : (
-        history.slice(0, 5).map((task) => <TaskProgressCard key={task.id} task={task} />)
-      )}
-    </ScrollView>
+        <SectionHeader overline="Quick access" title="Tools" />
+        <View style={styles.grid}>
+          {features.map((f) => (
+            <IconTile
+              key={f.key}
+              title={f.title}
+              subtitle={f.subtitle}
+              icon={f.icon}
+              tone={f.tone}
+              onPress={() => router.push(f.route)}
+              style={styles.tile}
+            />
+          ))}
+        </View>
+
+        <SectionHeader
+          title="Recent tasks"
+          actionLabel={history.length > 0 ? "View all" : undefined}
+          onAction={() => router.push("/profile/history")}
+        />
+        {history.length === 0 ? (
+          <EmptyState
+            icon="clock-time-four-outline"
+            title="No tasks yet"
+            description="Pick a tool above to process your first file."
+          />
+        ) : (
+          <View style={{ gap: 10 }}>
+            {history.slice(0, 5).map((task) => (
+              <TaskProgressCard key={task.id} task={task} />
+            ))}
+          </View>
+        )}
+      </Screen>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  container: { padding: 16, gap: 12 },
-  banner: { backgroundColor: "#4F46E5" },
-  bannerContent: { flexDirection: "row", alignItems: "center", gap: 12 },
-  bannerText: { flex: 1 },
-  bannerTitle: { color: "#FFF", fontWeight: "700" },
-  bannerSub: { color: "#E0E7FF" },
-  section: { marginTop: 12, fontWeight: "700" },
+  greetingRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  bannerContent: { flexDirection: "row", alignItems: "center", gap: 14, padding: 18 },
+  bannerIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 12, justifyContent: "space-between" },
   tile: { width: "48%" },
-  tileContent: { alignItems: "center", gap: 6, paddingVertical: 16 },
-  tileTitle: { fontWeight: "700" },
-  tileSub: { color: "#6B7280", textAlign: "center" },
-  empty: { color: "#6B7280", paddingVertical: 8 },
 });

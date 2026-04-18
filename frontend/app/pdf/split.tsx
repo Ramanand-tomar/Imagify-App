@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { StyleSheet } from "react-native";
-import { List, TextInput } from "react-native-paper";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
 import { PdfToolShell } from "@/components/PdfToolShell";
+import { Input, SelectedFileRow } from "@/components/ui";
 import { usePdfTool } from "@/hooks/usePdfTool";
 
 export default function SplitScreen() {
@@ -30,27 +29,18 @@ export default function SplitScreen() {
       }}
     >
       {!file ? (
-        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose PDF" />
+        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose a PDF" />
       ) : (
-        <List.Item
-          title={file.name}
-          description={`${(file.size / 1024 / 1024).toFixed(2)} MB`}
-          left={(p) => <List.Icon {...p} icon="file-pdf-box" />}
-          onPress={() => setFile(null)}
-        />
+        <SelectedFileRow name={file.name} sizeBytes={file.size} onRemove={() => setFile(null)} />
       )}
-      <TextInput
-        label="Page ranges (e.g. 1-3,5-7)"
+      <Input
+        label="Page ranges"
         value={ranges}
         onChangeText={setRanges}
         autoCapitalize="none"
-        mode="outlined"
-        style={styles.field}
+        leftIcon="format-list-numbered"
+        helper="Examples: 1-3  ·  1-3,5-7  ·  2"
       />
     </PdfToolShell>
   );
 }
-
-const styles = StyleSheet.create({
-  field: { marginTop: 16, backgroundColor: "transparent" },
-});

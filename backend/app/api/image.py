@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
+from app.api.tasks import download_url_for
 from app.models.task import Task
-from app.services import storage_service
 from app.dependencies import get_current_user, get_db
 from app.models.task import TaskType, TaskStatus
 from app.models.user import User
@@ -212,7 +212,7 @@ async def apply_enhancement(
     h, w = result_img.shape[:2]
     return ImageResultOut(
         task_id=task.id,
-        download_url=storage_service.get_signed_url(pf.imagekit_file_path, expire_seconds=3600),
+        download_url=download_url_for(task.id),
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,
@@ -245,7 +245,7 @@ async def convert(
     )
     return ImageResultOut(
         task_id=task.id,
-        download_url=storage_service.get_signed_url(pf.imagekit_file_path, expire_seconds=3600),
+        download_url=download_url_for(task.id),
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,
@@ -273,7 +273,7 @@ async def compress(
     )
     return ImageResultOut(
         task_id=task.id,
-        download_url=storage_service.get_signed_url(pf.imagekit_file_path, expire_seconds=3600),
+        download_url=download_url_for(task.id),
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,
@@ -425,7 +425,7 @@ async def deblur_from_session(
         )
         return ImageResultOut(
             task_id=task.id,
-            download_url=storage_service.get_signed_url(pf.imagekit_file_path, expire_seconds=3600),
+            download_url=download_url_for(task.id),
             original_filename=pf.original_filename,
             mime_type=pf.mime_type,
             size_bytes=pf.size_bytes,
@@ -462,7 +462,7 @@ async def homomorphic_from_session(
     )
     return ImageResultOut(
         task_id=task.id,
-        download_url=storage_service.get_signed_url(pf.imagekit_file_path, expire_seconds=3600),
+        download_url=download_url_for(task.id),
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,
@@ -493,50 +493,10 @@ async def resize(
     )
     return ImageResultOut(
         task_id=task.id,
-        download_url=storage_service.get_signed_url(pf.imagekit_file_path, expire_seconds=3600),
+        download_url=download_url_for(task.id),
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,
         width=out.width,
         height=out.height,
     )
-
-
-@router.post("/batch", response_model=BatchTaskStartedOut, status_code=status.HTTP_202_ACCEPTED)
-async def batch_image(
-    files: list[UploadFile] = File(...),
-    operation: str = Form(..., description="compress|convert|resize|histogram|denoise"),
-    params_json: str = Form("{}", description="JSON string of additional params"),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> BatchTaskStartedOut:
-    if len(files) > 5:
-        raise HTTPException(status_code=400, detail="Batch limit is 5 files")
-    
-    import json
-    try:
-        params = json.loads(params_json)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid params_json")
-
-    batch_id = uuid.uuid4()
-    task_ids = []
-
-    from app.tasks.image_tasks import batch_image_task
-    
-    for file in files:
-        data, filename, _ = await read_upload(file, allowed_mime=IMAGE_MIMES)
-        stash_path = stash_bytes(data, filename)
-        
-        # Create a pending task for each file
-        task = await create_pending_task_async(db, user_id=user.id, task_type=TaskType.IMAGE, batch_id=batch_id)
-        task_ids.append(task.id)
-        
-        # Enqueue fan-out
-        async_result = batch_image_task.delay(
-            str(task.id), str(stash_path), operation, params, filename
-        )
-        task.celery_task_id = async_result.id
-
-    await db.commit()
-    return BatchTaskStartedOut(batch_id=batch_id, task_ids=task_ids)

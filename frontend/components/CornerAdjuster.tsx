@@ -64,7 +64,7 @@ export function CornerAdjuster({
       {layout.width > 0 && corners.length === 4 && (
         <>
           <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
-            <Polygon points={polygonPoints} fill="rgba(16,185,129,0.18)" stroke="#10B981" strokeWidth={2} />
+            <Polygon points={polygonPoints} fill="rgba(99,102,241,0.18)" stroke="#6366F1" strokeWidth={2} />
           </Svg>
           {corners.map((c, i) => (
             <DraggableHandle
@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
     width: HANDLE,
     height: HANDLE,
     borderRadius: HANDLE / 2,
-    backgroundColor: "rgba(16,185,129,0.25)",
+    backgroundColor: "rgba(99,102,241,0.28)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: "#10B981",
+    backgroundColor: "#6366F1",
     borderWidth: 2,
     borderColor: "#FFF",
   },

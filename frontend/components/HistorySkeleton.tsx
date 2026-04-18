@@ -2,8 +2,11 @@ import { useEffect } from "react";
 import { StyleSheet, View } from "react-native";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
 
+import { useAppTheme } from "@/theme/useTheme";
+
 export function HistorySkeleton({ rows = 6 }: { rows?: number }) {
-  const opacity = useSharedValue(0.4);
+  const theme = useAppTheme();
+  const opacity = useSharedValue(0.45);
 
   useEffect(() => {
     opacity.value = withRepeat(
@@ -16,15 +19,31 @@ export function HistorySkeleton({ rows = 6 }: { rows?: number }) {
   const pulse = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
   return (
-    <View style={styles.wrap}>
+    <View style={{ gap: 12 }}>
       {Array.from({ length: rows }).map((_, i) => (
-        <Animated.View key={i} style={[styles.row, pulse]}>
-          <View style={styles.avatar} />
+        <Animated.View
+          key={i}
+          style={[
+            styles.row,
+            {
+              backgroundColor: theme.colors.surface.card,
+              borderColor: theme.colors.border.subtle,
+              borderRadius: theme.radius.lg,
+            },
+            pulse,
+          ]}
+        >
+          <View style={[styles.avatar, { backgroundColor: theme.colors.border.subtle }]} />
           <View style={styles.textCol}>
-            <View style={[styles.bar, { width: "40%" }]} />
-            <View style={[styles.bar, { width: "65%", marginTop: 8 }]} />
+            <View style={[styles.bar, { width: "40%", backgroundColor: theme.colors.border.subtle }]} />
+            <View
+              style={[
+                styles.bar,
+                { width: "70%", backgroundColor: theme.colors.border.subtle, marginTop: 8 },
+              ]}
+            />
           </View>
-          <View style={styles.badge} />
+          <View style={[styles.badge, { backgroundColor: theme.colors.border.subtle }]} />
         </Animated.View>
       ))}
     </View>
@@ -32,19 +51,15 @@ export function HistorySkeleton({ rows = 6 }: { rows?: number }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { padding: 16, gap: 12 },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: "#FFF",
+    padding: 14,
     borderWidth: 1,
-    borderColor: "#F3F4F6",
     gap: 12,
   },
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#E5E7EB" },
+  avatar: { width: 40, height: 40, borderRadius: 12 },
   textCol: { flex: 1 },
-  bar: { height: 10, borderRadius: 5, backgroundColor: "#E5E7EB" },
-  badge: { width: 60, height: 22, borderRadius: 11, backgroundColor: "#E5E7EB" },
+  bar: { height: 10, borderRadius: 5 },
+  badge: { width: 64, height: 22, borderRadius: 11 },
 });

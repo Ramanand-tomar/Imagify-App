@@ -1,6 +1,11 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
-import { StyleSheet } from "react-native";
-import { Snackbar } from "react-native-paper";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, StyleSheet, View } from "react-native";
+import { Icon } from "react-native-paper";
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { Text } from "@/components/ui";
+import { useAppTheme } from "@/theme/useTheme";
 
 type Variant = "info" | "success" | "error";
 
@@ -19,25 +24,31 @@ interface SnackbarCtx {
 
 const Ctx = createContext<SnackbarCtx | null>(null);
 
-const VARIANT_BG: Record<Variant, string> = {
-  info: "#1F2937",
-  success: "#065F46",
-  error: "#991B1B",
+const VARIANT_META: Record<Variant, { icon: string }> = {
+  info: { icon: "information-outline" },
+  success: { icon: "check-circle-outline" },
+  error: { icon: "alert-circle-outline" },
 };
 
 export function SnackbarProvider({ children }: { children: React.ReactNode }) {
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState("");
   const [variant, setVariant] = useState<Variant>("info");
-  const [duration, setDuration] = useState(3000);
-  const actionRef = useRef<Options["action"]>(undefined);
+  const [action, setAction] = useState<Options["action"]>(undefined);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const show = useCallback((msg: string, options: Options = {}) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
     setMessage(msg);
     setVariant(options.variant ?? "info");
-    setDuration(options.duration ?? 3000);
-    actionRef.current = options.action;
+    setAction(options.action);
     setVisible(true);
+    const duration = options.duration ?? 3200;
+    timerRef.current = setTimeout(() => setVisible(false), duration);
+  }, []);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
   }, []);
 
   const value = useMemo<SnackbarCtx>(
@@ -53,20 +64,96 @@ export function SnackbarProvider({ children }: { children: React.ReactNode }) {
   return (
     <Ctx.Provider value={value}>
       {children}
-      <Snackbar
+      <Toast
         visible={visible}
+        message={message}
+        variant={variant}
+        action={action}
         onDismiss={() => setVisible(false)}
-        duration={duration}
-        style={[styles.bar, { backgroundColor: VARIANT_BG[variant] }]}
-        action={
-          actionRef.current
-            ? { label: actionRef.current.label, onPress: actionRef.current.onPress }
-            : undefined
-        }
-      >
-        {message}
-      </Snackbar>
+      />
     </Ctx.Provider>
+  );
+}
+
+function Toast({
+  visible,
+  message,
+  variant,
+  action,
+  onDismiss,
+}: {
+  visible: boolean;
+  message: string;
+  variant: Variant;
+  action?: Options["action"];
+  onDismiss: () => void;
+}) {
+  const theme = useAppTheme();
+  const translateY = useSharedValue(40);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    translateY.value = withTiming(visible ? 0 : 40, { duration: 220 });
+    opacity.value = withTiming(visible ? 1 : 0, { duration: visible ? 220 : 160 });
+  }, [visible, translateY, opacity]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+    opacity: opacity.value,
+  }));
+
+  const accent =
+    variant === "success"
+      ? theme.colors.status.success
+      : variant === "error"
+      ? theme.colors.status.error
+      : theme.colors.brand.default;
+
+  const accentSoft =
+    variant === "success"
+      ? theme.colors.status.successSoft
+      : variant === "error"
+      ? theme.colors.status.errorSoft
+      : theme.colors.brand[50];
+
+  return (
+    <SafeAreaView edges={["bottom"]} style={styles.safe} pointerEvents="box-none">
+      <Animated.View style={[styles.wrap, animStyle]} pointerEvents={visible ? "auto" : "none"}>
+        <Pressable
+          onPress={onDismiss}
+          style={[
+            styles.card,
+            {
+              backgroundColor: theme.colors.surface.card,
+              borderColor: theme.colors.border.subtle,
+              borderRadius: theme.radius.lg,
+              ...theme.shadow.lg,
+            },
+          ]}
+        >
+          <View style={[styles.iconWrap, { backgroundColor: accentSoft }]}>
+            <Icon source={VARIANT_META[variant].icon} size={18} color={accent} />
+          </View>
+          <Text variant="body" numberOfLines={3} style={{ flex: 1, color: theme.colors.text.primary }}>
+            {message}
+          </Text>
+          {action ? (
+            <Pressable
+              onPress={() => {
+                action.onPress();
+                onDismiss();
+              }}
+              hitSlop={8}
+              style={styles.actionBtn}
+            >
+              <Text variant="titleSm" style={{ color: accent }}>
+                {action.label}
+              </Text>
+            </Pressable>
+          ) : null}
+        </Pressable>
+      </Animated.View>
+    </SafeAreaView>
   );
 }
 
@@ -77,5 +164,33 @@ export function useSnackbar(): SnackbarCtx {
 }
 
 const styles = StyleSheet.create({
-  bar: { marginBottom: 24 },
+  safe: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  wrap: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+  },
+  iconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+  },
 });

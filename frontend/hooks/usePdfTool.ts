@@ -95,7 +95,10 @@ export function usePdfTool({ endpoint, asyncTask }: UsePdfToolArgs): UsePdfToolS
           const response = await api.post(endpoint, form, {
             headers: { "Content-Type": "multipart/form-data" },
             onUploadProgress: (e) => {
-              if (e.total) setUploadPercent(Math.round((e.loaded / e.total) * 100));
+              if (e.total) {
+                const pct = Math.round((e.loaded / e.total) * 100);
+                setUploadPercent(Math.min(100, Math.max(0, pct)));
+              }
             },
           });
           data = response.data;

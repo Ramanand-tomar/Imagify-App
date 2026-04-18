@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { StyleSheet } from "react-native";
-import { List, TextInput } from "react-native-paper";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
 import { PdfToolShell } from "@/components/PdfToolShell";
+import { Input, SelectedFileRow } from "@/components/ui";
 import { usePdfTool } from "@/hooks/usePdfTool";
 
 export default function UnlockScreen() {
   const [file, setFile] = useState<PickedFile | null>(null);
   const [password, setPassword] = useState("");
+  const [show, setShow] = useState(false);
   const tool = usePdfTool({ endpoint: "/pdf/unlock", asyncTask: false });
 
   return (
@@ -31,27 +31,19 @@ export default function UnlockScreen() {
       }}
     >
       {!file ? (
-        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose PDF" />
+        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose a PDF" />
       ) : (
-        <List.Item
-          title={file.name}
-          description={`${(file.size / 1024 / 1024).toFixed(2)} MB`}
-          left={(p) => <List.Icon {...p} icon="file-lock" />}
-          onPress={() => setFile(null)}
-        />
+        <SelectedFileRow name={file.name} sizeBytes={file.size} icon="file-lock" onRemove={() => setFile(null)} />
       )}
-      <TextInput
+      <Input
         label="Password"
         value={password}
         onChangeText={setPassword}
-        secureTextEntry
-        mode="outlined"
-        style={styles.field}
+        secureTextEntry={!show}
+        leftIcon="lock-open-outline"
+        rightIcon={show ? "eye-off-outline" : "eye-outline"}
+        onRightIconPress={() => setShow((s) => !s)}
       />
     </PdfToolShell>
   );
 }
-
-const styles = StyleSheet.create({
-  field: { marginTop: 16, backgroundColor: "transparent" },
-});

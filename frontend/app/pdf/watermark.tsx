@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { List, Text, TextInput } from "react-native-paper";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
 import { PdfToolShell } from "@/components/PdfToolShell";
+import { Card, Input, SelectedFileRow, Text } from "@/components/ui";
 import { usePdfTool } from "@/hooks/usePdfTool";
 
 export default function WatermarkScreen() {
@@ -46,60 +46,52 @@ export default function WatermarkScreen() {
       }}
     >
       {!file ? (
-        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose PDF" />
+        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose a PDF" />
       ) : (
-        <List.Item
-          title={file.name}
-          description={`${(file.size / 1024 / 1024).toFixed(2)} MB`}
-          left={(p) => <List.Icon {...p} icon="file-pdf-box" />}
-          onPress={() => setFile(null)}
-        />
+        <SelectedFileRow name={file.name} sizeBytes={file.size} onRemove={() => setFile(null)} />
       )}
-      <TextInput
-        label="Watermark text"
-        value={text}
-        onChangeText={setText}
-        mode="outlined"
-        style={styles.field}
-      />
+
+      <Input label="Watermark text" value={text} onChangeText={setText} leftIcon="watermark" />
       <View style={styles.row}>
-        <TextInput
-          label="Opacity (0-1)"
-          value={opacity}
-          onChangeText={setOpacity}
-          keyboardType="decimal-pad"
-          mode="outlined"
-          style={[styles.field, styles.flex]}
-          error={!opacityValid}
-        />
-        <TextInput
-          label="Font size"
-          value={fontSize}
-          onChangeText={setFontSize}
-          keyboardType="number-pad"
-          mode="outlined"
-          style={[styles.field, styles.flex]}
-          error={!fsValid}
-        />
+        <View style={{ flex: 1 }}>
+          <Input
+            label="Opacity (0-1)"
+            value={opacity}
+            onChangeText={setOpacity}
+            keyboardType="decimal-pad"
+            errorText={!opacityValid ? "0 < opacity ≤ 1" : undefined}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Input
+            label="Font size"
+            value={fontSize}
+            onChangeText={setFontSize}
+            keyboardType="number-pad"
+            errorText={!fsValid ? "8–200" : undefined}
+          />
+        </View>
       </View>
-      <TextInput
+      <Input
         label="Rotation (°)"
         value={rotation}
         onChangeText={setRotation}
         keyboardType="number-pad"
-        mode="outlined"
-        style={styles.field}
+        leftIcon="rotate-right"
       />
-      <Text variant="bodySmall" style={styles.hint}>
-        Tip: 30° rotation with 0.2–0.4 opacity looks like a typical CONFIDENTIAL stamp.
-      </Text>
+
+      <Card variant="tinted">
+        <Text variant="caption" tone="secondary">
+          Tip
+        </Text>
+        <Text variant="bodySm" style={{ marginTop: 4 }}>
+          30° rotation with 0.2–0.4 opacity mimics a standard CONFIDENTIAL stamp.
+        </Text>
+      </Card>
     </PdfToolShell>
   );
 }
 
 const styles = StyleSheet.create({
-  field: { marginTop: 12, backgroundColor: "transparent" },
-  row: { flexDirection: "row", gap: 8 },
-  flex: { flex: 1 },
-  hint: { color: "#6B7280", marginTop: 8 },
+  row: { flexDirection: "row", gap: 10 },
 });

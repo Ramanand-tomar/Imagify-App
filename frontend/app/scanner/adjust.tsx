@@ -1,15 +1,17 @@
-import { Stack, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
-import { ActivityIndicator, Button, Chip, HelperText, SegmentedButtons, Switch, Text } from "react-native-paper";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { Switch } from "react-native-paper";
 
 import { CornerAdjuster } from "@/components/CornerAdjuster";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
+import { AppHeader, Button, Card, ChipGroup, EmptyState, Screen, SectionHeader, Text } from "@/components/ui";
 import { useScanner, type ScanConfig } from "@/hooks/useScanner";
 import { useScannerStore } from "@/stores/scannerStore";
+import { useAppTheme } from "@/theme/useTheme";
 
 export default function ScannerAdjustScreen() {
+  const theme = useAppTheme();
   const router = useRouter();
   const scanner = useScanner();
   const pendingFile = useScannerStore((s) => s.pendingFile);
@@ -51,134 +53,154 @@ export default function ScannerAdjustScreen() {
 
   if (!pendingFile) {
     return (
-      <SafeAreaView style={styles.container} edges={["bottom"]}>
-        <Stack.Screen options={{ title: "Adjust corners" }} />
-        <View style={styles.center}>
-          <Text variant="bodyMedium">No image selected. Go back to the Scanner tab.</Text>
-        </View>
-      </SafeAreaView>
+      <>
+        <AppHeader title="Adjust corners" />
+        <Screen>
+          <EmptyState
+            icon="image-off-outline"
+            title="No image selected"
+            description="Go back to the Scanner tab to pick one."
+            actionLabel="Back to Scanner"
+            onAction={() => router.replace("/(tabs)/scanner")}
+          />
+        </Screen>
+      </>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
-      <Stack.Screen options={{ title: "Adjust corners" }} />
-      <ScrollView contentContainerStyle={styles.scroll}>
+    <>
+      <AppHeader title="Adjust corners" subtitle="Drag the handles to refine detection" />
+      <Screen>
         {!scanner.sourceUri ? (
           <View style={styles.center}>
-            <ActivityIndicator size="large" />
-            <Text style={styles.mt}>Uploading image...</Text>
+            <ActivityIndicator size="large" color={theme.colors.brand.default} />
+            <Text variant="body" tone="secondary" style={{ marginTop: 12 }}>
+              Uploading image…
+            </Text>
           </View>
         ) : (
           <>
-            <CornerAdjuster
-              imageUri={scanner.sourceUri}
-              imageWidth={scanner.sourceWidth}
-              imageHeight={scanner.sourceHeight}
-              corners={scanner.corners}
-              onCornersChange={scanner.setCorners}
-            />
+            <Card padded={false} radius="xl" style={{ overflow: "hidden" }}>
+              <CornerAdjuster
+                imageUri={scanner.sourceUri}
+                imageWidth={scanner.sourceWidth}
+                imageHeight={scanner.sourceHeight}
+                corners={scanner.corners}
+                onCornersChange={scanner.setCorners}
+              />
+            </Card>
 
-            {scanner.detecting && (
+            {scanner.detecting ? (
               <View style={styles.inlineRow}>
-                <ActivityIndicator size="small" />
-                <Text variant="bodySmall" style={styles.hint}>Detecting edges...</Text>
+                <ActivityIndicator size="small" color={theme.colors.brand.default} />
+                <Text variant="caption" tone="secondary">
+                  Detecting edges…
+                </Text>
               </View>
-            )}
+            ) : null}
 
-            <Text variant="titleSmall" style={styles.sectionLabel}>Processing</Text>
+            <SectionHeader title="Processing" />
+            <Card padded={false}>
+              <View style={[styles.settingRow, { borderBottomColor: theme.colors.border.subtle }]}>
+                <View style={{ flex: 1 }}>
+                  <Text variant="titleMd">Deskew</Text>
+                  <Text variant="caption" tone="secondary">
+                    Straighten tilted pages
+                  </Text>
+                </View>
+                <Switch
+                  value={config.do_deskew}
+                  onValueChange={(v) => setConfig((c) => ({ ...c, do_deskew: v }))}
+                  color={theme.colors.brand.default}
+                />
+              </View>
+              <View style={[styles.settingRow, { borderBottomWidth: 0 }]}>
+                <View style={{ flex: 1 }}>
+                  <Text variant="titleMd">Remove shadows</Text>
+                  <Text variant="caption" tone="secondary">
+                    Clean up uneven lighting
+                  </Text>
+                </View>
+                <Switch
+                  value={config.do_shadow_removal}
+                  onValueChange={(v) => setConfig((c) => ({ ...c, do_shadow_removal: v }))}
+                  color={theme.colors.brand.default}
+                />
+              </View>
+            </Card>
 
-            <View style={styles.settingRow}>
-              <Text>Deskew</Text>
-              <Switch
-                value={config.do_deskew}
-                onValueChange={(v) => setConfig((c) => ({ ...c, do_deskew: v }))}
+            <View style={{ gap: 8 }}>
+              <Text variant="titleSm">Output style</Text>
+              <ChipGroup
+                value={config.binarize}
+                onChange={(v) => setConfig((c) => ({ ...c, binarize: v as ScanConfig["binarize"] }))}
+                options={[
+                  { value: "none", label: "Color" },
+                  { value: "adaptive", label: "B&W" },
+                  { value: "otsu", label: "High contrast" },
+                ]}
               />
             </View>
-            <View style={styles.settingRow}>
-              <Text>Remove shadows</Text>
-              <Switch
-                value={config.do_shadow_removal}
-                onValueChange={(v) => setConfig((c) => ({ ...c, do_shadow_removal: v }))}
+
+            <View style={{ gap: 8 }}>
+              <Text variant="titleSm">Export as</Text>
+              <ChipGroup
+                value={config.export_as}
+                onChange={(v) => setConfig((c) => ({ ...c, export_as: v as ScanConfig["export_as"] }))}
+                options={[
+                  { value: "image", label: "JPEG", icon: "image-outline" },
+                  { value: "pdf", label: "PDF", icon: "file-pdf-box" },
+                ]}
               />
             </View>
 
-            <Text variant="bodyMedium" style={styles.groupLabel}>Output style</Text>
-            <SegmentedButtons
-              value={config.binarize}
-              onValueChange={(v) => setConfig((c) => ({ ...c, binarize: v as ScanConfig["binarize"] }))}
-              buttons={[
-                { value: "none", label: "Color" },
-                { value: "adaptive", label: "B&W" },
-                { value: "otsu", label: "High contrast" },
-              ]}
-            />
-
-            <Text variant="bodyMedium" style={styles.groupLabel}>Export as</Text>
-            <View style={styles.chipRow}>
-              <Chip
-                icon="image"
-                selected={config.export_as === "image"}
-                onPress={() => setConfig((c) => ({ ...c, export_as: "image" }))}
-              >
-                JPEG
-              </Chip>
-              <Chip
-                icon="file-pdf-box"
-                selected={config.export_as === "pdf"}
-                onPress={() => setConfig((c) => ({ ...c, export_as: "pdf" }))}
-              >
-                PDF
-              </Chip>
-            </View>
-
-            {scanner.error && <HelperText type="error" visible>{scanner.error}</HelperText>}
+            {scanner.error ? (
+              <View style={[styles.errorBanner, { backgroundColor: theme.colors.status.errorSoft, borderRadius: theme.radius.md }]}>
+                <Text variant="bodySm" tone="error">
+                  {scanner.error}
+                </Text>
+              </View>
+            ) : null}
 
             <View style={styles.actions}>
               <Button
-                mode="outlined"
+                label="Re-detect"
+                variant="secondary"
                 icon="auto-fix"
                 onPress={() => scanner.detectEdges()}
                 disabled={scanner.detecting}
-              >
-                Re-detect
-              </Button>
+                style={{ flex: 1 }}
+                fullWidth
+              />
               <Button
-                mode="contained"
+                label="Scan"
                 icon="scan-helper"
                 onPress={onProcess}
                 loading={scanner.processing}
                 disabled={scanner.processing || scanner.corners.length !== 4}
-                style={styles.scan}
-              >
-                Scan
-              </Button>
+                style={{ flex: 1 }}
+                fullWidth
+              />
             </View>
           </>
         )}
-      </ScrollView>
-
-      <LoadingOverlay visible={scanner.processing} message="Processing document..." />
-    </SafeAreaView>
+      </Screen>
+      <LoadingOverlay visible={scanner.processing} message="Processing document…" />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scroll: { padding: 16, gap: 12 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  mt: { marginTop: 12, color: "#6B7280" },
+  center: { padding: 48, alignItems: "center", justifyContent: "center" },
   inlineRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  hint: { color: "#6B7280" },
-  sectionLabel: { marginTop: 12, fontWeight: "700" },
   settingRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 4,
+    gap: 12,
+    padding: 14,
+    borderBottomWidth: 1,
   },
-  groupLabel: { marginTop: 10 },
-  chipRow: { flexDirection: "row", gap: 8 },
-  actions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 16 },
-  scan: { minWidth: 120 },
+  actions: { flexDirection: "row", gap: 10 },
+  errorBanner: { padding: 12 },
 });

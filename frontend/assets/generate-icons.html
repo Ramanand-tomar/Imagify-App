@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Imagify AI — Icon Generator</title>
+<style>
+  :root {
+    --bg: #0F172A;
+    --card: #FFFFFF;
+    --ink: #0F172A;
+    --muted: #475569;
+    --brand: #6366F1;
+    --accent: #8B5CF6;
+    --border: #E2E8F0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: -apple-system, "Segoe UI", Roboto, Inter, sans-serif;
+    background: linear-gradient(135deg, #EEF2FF 0%, #F5F3FF 50%, #ECFEFF 100%);
+    color: var(--ink);
+    padding: 40px 24px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.3px; }
+  .sub { color: var(--muted); margin-bottom: 32px; }
+  .actions {
+    display: flex; gap: 12px; flex-wrap: wrap;
+    padding: 16px; margin-bottom: 24px;
+    background: var(--card); border-radius: 16px;
+    box-shadow: 0 4px 24px rgba(15,23,42,0.06);
+    border: 1px solid var(--border);
+  }
+  .btn {
+    appearance: none; border: 0; cursor: pointer;
+    font-family: inherit; font-weight: 600; font-size: 14px;
+    padding: 10px 18px; border-radius: 10px;
+    background: var(--brand); color: white;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.1);
+    transition: transform 80ms, background 120ms;
+  }
+  .btn:hover { background: #4F46E5; }
+  .btn:active { transform: scale(0.97); }
+  .btn.secondary { background: #F1F5F9; color: var(--ink); }
+  .btn.secondary:hover { background: #E2E8F0; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+  }
+  .tile {
+    background: var(--card);
+    border-radius: 16px;
+    padding: 18px;
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 24px rgba(15,23,42,0.04);
+  }
+  .preview {
+    display: flex; align-items: center; justify-content: center;
+    background: repeating-conic-gradient(#F1F5F9 0% 25%, #FFFFFF 0% 50%) 50% / 20px 20px;
+    border-radius: 12px;
+    min-height: 180px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .preview img { max-width: 100%; max-height: 160px; border-radius: 8px; }
+  .meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .meta h3 { font-size: 14px; margin: 0; }
+  .meta .dims { font-size: 12px; color: var(--muted); }
+  .tile .dl {
+    display: block; text-align: center;
+    padding: 8px 12px; border-radius: 8px;
+    background: var(--brand); color: white;
+    font-size: 13px; font-weight: 600; text-decoration: none;
+  }
+  .tile .dl:hover { background: #4F46E5; }
+  .hint {
+    margin-top: 28px; padding: 18px; border-radius: 14px;
+    background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2);
+    font-size: 13px; color: #3730A3; line-height: 1.55;
+  }
+  code {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    background: rgba(15,23,42,0.06); padding: 1px 6px; border-radius: 4px;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Imagify AI — App Icon Generator</h1>
+    <p class="sub">Click an icon to download it. Save each file to <code>frontend/assets/</code> with the suggested filename.</p>
+
+    <div class="actions">
+      <button class="btn" id="downloadAll">Download all</button>
+      <button class="btn secondary" id="copyPaths">Show app.json snippet</button>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <div class="hint">
+      <strong>What each file does:</strong><br/>
+      • <code>icon.png</code> — iOS app icon &amp; general fallback (1024×1024 full-bleed).<br/>
+      • <code>adaptive-icon.png</code> — Android adaptive foreground. The brand mark sits inside Android's 66% safe zone (center 680×680 of 1024×1024) so launchers can mask it as a circle/rounded-square without clipping. The solid color behind is set in <code>app.json</code>.<br/>
+      • <code>favicon.png</code> — web favicon, 48×48.<br/>
+      • <code>splash-icon.png</code> — transparent 512×512 mark used by <code>expo-splash-screen</code> (optional).<br/>
+    </div>
+
+    <pre id="snippet" style="display:none; margin-top:18px; padding:18px; border-radius:14px; background:#0F172A; color:#E2E8F0; font-size:12px; overflow:auto;">
+"icon": "./assets/icon.png",
+"android": {
+  "package": "com.imagify.app",
+  "adaptiveIcon": {
+    "foregroundImage": "./assets/adaptive-icon.png",
+    "backgroundColor": "#6366F1"
+  }
+},
+"web": { "bundler": "metro", "output": "static", "favicon": "./assets/favicon.png" }
+    </pre>
+  </div>
+
+<script>
+// --- SVG templates ---------------------------------------------------------
+// Full-bleed icon (iOS): same gradient background covers the whole 1024 canvas.
+const SVG_FULLBLEED = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366F1"/>
+      <stop offset="0.55" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="s" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FEF3C7"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#g)"/>
+  <rect x="224" y="320" width="416" height="416" rx="80" ry="80"
+        fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="32"/>
+  <rect x="320" y="416" width="416" height="416" rx="80" ry="80"
+        fill="#FFFFFF" fill-opacity="0.95"/>
+  <path d="M 352 752 L 464 624 L 544 704 L 624 608 L 704 752 Z"
+        fill="#6366F1" opacity="0.92"/>
+  <circle cx="640" cy="512" r="36" fill="#8B5CF6" opacity="0.9"/>
+  <path d="M 800 192 L 832 272 L 912 304 L 832 336 L 800 416 L 768 336 L 688 304 L 768 272 Z"
+        fill="url(#s)"/>
+</svg>`;
+
+// Adaptive foreground: rounded-square brand badge inside the 66% safe zone.
+// Android composites this with the solid backgroundColor from app.json and
+// then masks it as circle/squircle/etc.
+const SVG_ADAPTIVE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366F1"/>
+      <stop offset="0.55" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="s2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FEF3C7"/>
+    </linearGradient>
+  </defs>
+  <!-- Safe zone: 66% of 1024 = 676; center at 512. So x=172, size=680. -->
+  <rect x="172" y="172" width="680" height="680" rx="180" ry="180"
+        fill="url(#g2)"/>
+  <!-- Scale inner content proportionally (original 1024 → 680, factor ≈ 0.664) -->
+  <g transform="translate(172,172) scale(0.664)">
+    <rect x="224" y="320" width="416" height="416" rx="80" ry="80"
+          fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="32"/>
+    <rect x="320" y="416" width="416" height="416" rx="80" ry="80"
+          fill="#FFFFFF" fill-opacity="0.95"/>
+    <path d="M 352 752 L 464 624 L 544 704 L 624 608 L 704 752 Z"
+          fill="#6366F1" opacity="0.92"/>
+    <circle cx="640" cy="512" r="36" fill="#8B5CF6" opacity="0.9"/>
+    <path d="M 800 192 L 832 272 L 912 304 L 832 336 L 800 416 L 768 336 L 688 304 L 768 272 Z"
+          fill="url(#s2)"/>
+  </g>
+</svg>`;
+
+// Splash mark: same badge, transparent outside. Smaller (512).
+const SVG_SPLASH = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366F1"/>
+      <stop offset="0.55" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="s3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FEF3C7"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="140" ry="140" fill="url(#g3)"/>
+  <g transform="scale(0.5)">
+    <rect x="224" y="320" width="416" height="416" rx="80" ry="80"
+          fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="32"/>
+    <rect x="320" y="416" width="416" height="416" rx="80" ry="80"
+          fill="#FFFFFF" fill-opacity="0.95"/>
+    <path d="M 352 752 L 464 624 L 544 704 L 624 608 L 704 752 Z"
+          fill="#6366F1" opacity="0.92"/>
+    <circle cx="640" cy="512" r="36" fill="#8B5CF6" opacity="0.9"/>
+    <path d="M 800 192 L 832 272 L 912 304 L 832 336 L 800 416 L 768 336 L 688 304 L 768 272 Z"
+          fill="url(#s3)"/>
+  </g>
+</svg>`;
+
+// --- render SVG → PNG via canvas -----------------------------------------
+function renderToPng(svgString, size) {
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      ctx.clearRect(0, 0, size, size);
+      ctx.drawImage(img, 0, 0, size, size);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((b) => {
+        if (!b) return reject(new Error("toBlob failed"));
+        resolve({ blob: b, dataUrl: canvas.toDataURL("image/png") });
+      }, "image/png");
+    };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+const TARGETS = [
+  { name: "icon.png",           svg: SVG_FULLBLEED, size: 1024, label: "iOS / general" },
+  { name: "adaptive-icon.png",  svg: SVG_ADAPTIVE,  size: 1024, label: "Android adaptive foreground" },
+  { name: "favicon.png",        svg: SVG_FULLBLEED, size: 48,   label: "Web favicon" },
+  { name: "splash-icon.png",    svg: SVG_SPLASH,    size: 512,  label: "Splash icon (optional)" },
+];
+
+const grid = document.getElementById("grid");
+const renders = [];
+
+async function init() {
+  for (const t of TARGETS) {
+    const { blob, dataUrl } = await renderToPng(t.svg, t.size);
+    renders.push({ name: t.name, blob });
+
+    const tile = document.createElement("div");
+    tile.className = "tile";
+    tile.innerHTML = `
+      <div class="preview"><img alt="${t.name}" src="${dataUrl}"/></div>
+      <div class="meta">
+        <h3>${t.name}</h3>
+        <span class="dims">${t.size}×${t.size}</span>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${t.label}</div>
+      <a class="dl" href="${dataUrl}" download="${t.name}">Download</a>
+    `;
+    grid.appendChild(tile);
+  }
+}
+init();
+
+document.getElementById("downloadAll").addEventListener("click", () => {
+  for (const r of renders) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(r.blob);
+    a.download = r.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+});
+
+document.getElementById("copyPaths").addEventListener("click", () => {
+  const pre = document.getElementById("snippet");
+  pre.style.display = pre.style.display === "none" ? "block" : "none";
+});
+</script>
+</body>
+</html>

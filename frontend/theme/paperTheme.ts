@@ -1,20 +1,86 @@
-import { MD3LightTheme, MD3DarkTheme } from "react-native-paper";
+import { MD3DarkTheme, MD3LightTheme, configureFonts } from "react-native-paper";
+
+import { colors, fontFamily } from "./tokens";
+
+const fontConfig = {
+  displayLarge: { fontFamily: fontFamily.bold, fontWeight: "700" as const, fontSize: 34, lineHeight: 40, letterSpacing: -0.4 },
+  displayMedium: { fontFamily: fontFamily.bold, fontWeight: "700" as const, fontSize: 28, lineHeight: 34, letterSpacing: -0.3 },
+  displaySmall: { fontFamily: fontFamily.semibold, fontWeight: "600" as const, fontSize: 22, lineHeight: 28, letterSpacing: -0.2 },
+  headlineLarge: { fontFamily: fontFamily.bold, fontWeight: "700" as const, fontSize: 26, lineHeight: 32, letterSpacing: -0.2 },
+  headlineMedium: { fontFamily: fontFamily.semibold, fontWeight: "600" as const, fontSize: 22, lineHeight: 28, letterSpacing: -0.2 },
+  headlineSmall: { fontFamily: fontFamily.semibold, fontWeight: "600" as const, fontSize: 18, lineHeight: 24 },
+  titleLarge: { fontFamily: fontFamily.semibold, fontWeight: "600" as const, fontSize: 17, lineHeight: 22 },
+  titleMedium: { fontFamily: fontFamily.semibold, fontWeight: "600" as const, fontSize: 15, lineHeight: 20 },
+  titleSmall: { fontFamily: fontFamily.medium, fontWeight: "500" as const, fontSize: 13, lineHeight: 18 },
+  labelLarge: { fontFamily: fontFamily.semibold, fontWeight: "600" as const, fontSize: 14, lineHeight: 18, letterSpacing: 0.1 },
+  labelMedium: { fontFamily: fontFamily.medium, fontWeight: "500" as const, fontSize: 12, lineHeight: 16, letterSpacing: 0.4 },
+  labelSmall: { fontFamily: fontFamily.medium, fontWeight: "500" as const, fontSize: 11, lineHeight: 14, letterSpacing: 0.4 },
+  bodyLarge: { fontFamily: fontFamily.regular, fontWeight: "400" as const, fontSize: 16, lineHeight: 24 },
+  bodyMedium: { fontFamily: fontFamily.regular, fontWeight: "400" as const, fontSize: 14, lineHeight: 20 },
+  bodySmall: { fontFamily: fontFamily.regular, fontWeight: "400" as const, fontSize: 13, lineHeight: 18 },
+  default: { fontFamily: fontFamily.regular, fontWeight: "400" as const, fontSize: 14, lineHeight: 20, letterSpacing: 0 },
+};
+
+const paperFonts = configureFonts({ config: fontConfig });
 
 export const lightTheme = {
   ...MD3LightTheme,
+  fonts: paperFonts,
+  roundness: 12,
   colors: {
     ...MD3LightTheme.colors,
-    primary: "#4F46E5",
-    secondary: "#06B6D4",
-    background: "#F9FAFB",
+    primary: colors.light.brand.default,
+    onPrimary: colors.light.brand.contrast,
+    primaryContainer: colors.light.brand[100],
+    onPrimaryContainer: colors.light.brand[800],
+    secondary: colors.light.accent.cyan,
+    onSecondary: "#FFFFFF",
+    secondaryContainer: "#CFFAFE",
+    onSecondaryContainer: "#083344",
+    tertiary: colors.light.accent.violet,
+    onTertiary: "#FFFFFF",
+    background: colors.light.surface.background,
+    onBackground: colors.light.text.primary,
+    surface: colors.light.surface.card,
+    onSurface: colors.light.text.primary,
+    surfaceVariant: colors.light.surface.subtle,
+    onSurfaceVariant: colors.light.text.secondary,
+    outline: colors.light.border.default,
+    outlineVariant: colors.light.border.subtle,
+    error: colors.light.status.error,
+    errorContainer: colors.light.status.errorSoft,
+    onError: "#FFFFFF",
+    onErrorContainer: "#7F1D1D",
   },
 };
 
 export const darkTheme = {
   ...MD3DarkTheme,
+  fonts: paperFonts,
+  roundness: 12,
   colors: {
     ...MD3DarkTheme.colors,
-    primary: "#818CF8",
-    secondary: "#22D3EE",
+    primary: colors.dark.brand.default,
+    onPrimary: colors.dark.brand.contrast,
+    primaryContainer: colors.dark.brand[800],
+    onPrimaryContainer: colors.dark.brand[100],
+    secondary: colors.dark.accent.cyan,
+    onSecondary: "#052E2C",
+    secondaryContainer: "#0E7490",
+    onSecondaryContainer: "#CFFAFE",
+    tertiary: colors.dark.accent.violet,
+    onTertiary: "#1E1B4B",
+    background: colors.dark.surface.background,
+    onBackground: colors.dark.text.primary,
+    surface: colors.dark.surface.card,
+    onSurface: colors.dark.text.primary,
+    surfaceVariant: colors.dark.surface.subtle,
+    onSurfaceVariant: colors.dark.text.secondary,
+    outline: colors.dark.border.default,
+    outlineVariant: colors.dark.border.subtle,
+    error: colors.dark.status.error,
+    errorContainer: colors.dark.status.errorSoft,
+    onError: "#FFFFFF",
+    onErrorContainer: "#FECACA",
   },
 };

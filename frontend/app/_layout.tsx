@@ -1,14 +1,28 @@
+import {
+  Poppins_400Regular,
+  Poppins_500Medium,
+  Poppins_600SemiBold,
+  Poppins_700Bold,
+  useFonts,
+} from "@expo-google-fonts/poppins";
 import { Slot, useRouter, useSegments } from "expo-router";
-import { useEffect } from "react";
-import { useColorScheme, View, ActivityIndicator } from "react-native";
+import * as SplashScreen from "expo-splash-screen";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, useColorScheme, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { PaperProvider } from "react-native-paper";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { SplashIntro } from "@/components/SplashIntro";
 import { SnackbarProvider } from "@/providers/SnackbarProvider";
 import { useAuthStore } from "@/stores/authStore";
+import { colors } from "@/theme/tokens";
 import { darkTheme, lightTheme } from "@/theme/paperTheme";
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
+const SPLASH_DURATION_MS = 1800;
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -16,6 +30,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const hydrated = useAuthStore((s) => s.hydrated);
   const accessToken = useAuthStore((s) => s.accessToken);
   const hydrate = useAuthStore((s) => s.hydrate);
+  const scheme = useColorScheme();
+  const bg = scheme === "dark" ? colors.dark.surface.background : colors.light.surface.background;
 
   useEffect(() => {
     hydrate();
@@ -33,8 +49,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (!hydrated) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator size="large" />
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: bg }}>
+        <ActivityIndicator size="large" color={colors.light.brand.default} />
       </View>
     );
   }
@@ -44,6 +60,26 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 export default function RootLayout() {
   const scheme = useColorScheme();
   const theme = scheme === "dark" ? darkTheme : lightTheme;
+  const [splashDone, setSplashDone] = useState(false);
+
+  const [fontsLoaded, fontError] = useFonts({
+    Poppins_400Regular,
+    Poppins_500Medium,
+    Poppins_600SemiBold,
+    Poppins_700Bold,
+  });
+
+  const onReady = useCallback(async () => {
+    if (fontsLoaded || fontError) {
+      await SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [fontsLoaded, fontError]);
+
+  useEffect(() => {
+    onReady();
+  }, [onReady]);
+
+  if (!fontsLoaded && !fontError) return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -56,6 +92,9 @@ export default function RootLayout() {
               </AuthGate>
             </SnackbarProvider>
           </ErrorBoundary>
+          {!splashDone ? (
+            <SplashIntro duration={SPLASH_DURATION_MS} onFinished={() => setSplashDone(true)} />
+          ) : null}
         </PaperProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

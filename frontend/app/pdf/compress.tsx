@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { StyleSheet, View } from "react-native";
-import { Chip, List, Text } from "react-native-paper";
+import { View } from "react-native";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
 import { PdfToolShell } from "@/components/PdfToolShell";
+import { Card, ChipGroup, SelectedFileRow, Text } from "@/components/ui";
 import { usePdfTool } from "@/hooks/usePdfTool";
 
 type Quality = "low" | "medium" | "high";
@@ -16,7 +16,7 @@ export default function CompressScreen() {
   const estimatedSize = (() => {
     if (!file) return "";
     const factor = quality === "low" ? 0.3 : quality === "medium" ? 0.55 : 0.8;
-    return `~${(file.size * factor / 1024 / 1024).toFixed(2)} MB`;
+    return `~${((file.size * factor) / 1024 / 1024).toFixed(2)} MB`;
   })();
 
   return (
@@ -38,35 +38,34 @@ export default function CompressScreen() {
       }}
     >
       {!file ? (
-        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose PDF" />
+        <FileUploader accept="pdf" onFilePicked={setFile} label="Choose a PDF" />
       ) : (
-        <List.Item
-          title={file.name}
-          description={`${(file.size / 1024 / 1024).toFixed(2)} MB`}
-          left={(p) => <List.Icon {...p} icon="file-pdf-box" />}
-          onPress={() => setFile(null)}
+        <SelectedFileRow name={file.name} sizeBytes={file.size} onRemove={() => setFile(null)} />
+      )}
+
+      <View style={{ gap: 8 }}>
+        <Text variant="titleSm">Quality</Text>
+        <ChipGroup
+          value={quality}
+          onChange={setQuality}
+          options={[
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High" },
+          ]}
         />
-      )}
-      <Text variant="titleSmall" style={styles.label}>Quality</Text>
-      <View style={styles.chips}>
-        {(["low", "medium", "high"] as Quality[]).map((q) => (
-          <Chip key={q} selected={quality === q} onPress={() => setQuality(q)} style={styles.chip}>
-            {q[0].toUpperCase() + q.slice(1)}
-          </Chip>
-        ))}
       </View>
-      {file && (
-        <Text variant="bodySmall" style={styles.estimate}>
-          Estimated output: {estimatedSize}
-        </Text>
-      )}
+
+      {file ? (
+        <Card variant="tinted">
+          <Text variant="caption" tone="secondary">
+            Estimated output
+          </Text>
+          <Text variant="h3" style={{ marginTop: 4 }}>
+            {estimatedSize}
+          </Text>
+        </Card>
+      ) : null}
     </PdfToolShell>
   );
 }
-
-const styles = StyleSheet.create({
-  label: { marginTop: 16, marginBottom: 8 },
-  chips: { flexDirection: "row", gap: 8 },
-  chip: {},
-  estimate: { color: "#6B7280", marginTop: 8 },
-});
