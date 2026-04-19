@@ -2,16 +2,11 @@ from __future__ import annotations
 
 import binascii
 import logging
-from typing import TYPE_CHECKING
 
 import httpx
 from imagekitio import ImageKit
-from imagekitio.models.UploadFileRequestOptions import UploadFileRequestOptions
 
 from app.config import settings
-
-if TYPE_CHECKING:
-    from imagekitio.models.UploadFileResponse import UploadFileResponse
 
 logger = logging.getLogger("imagify.storage")
 
@@ -135,6 +130,9 @@ def _verify_uploaded_bytes(
     )
 
 
+_IMAGEKIT_UPLOAD_ENDPOINT = "https://upload.imagekit.io/api/v1/files/upload"
+
+
 def upload_file(
     file_bytes: bytes,
     filename: str,
@@ -144,21 +142,25 @@ def upload_file(
     mime_type: str | None = None,
     verify: bool = True,
 ) -> tuple[str, str, str]:
-    """Uploads a file to ImageKit.
+    """Upload bytes to ImageKit via a direct multipart POST (NOT the Python SDK).
 
-    Returns ``(file_id, file_path, url)``.
+    The bundled ``imagekitio==3.2.0`` SDK was observed corrupting binary
+    uploads: PDF/binary inputs were being mangled in transit so that the
+    file stored on ImageKit was completely different from what we sent
+    (verified by post-upload byte comparison). Posting the multipart body
+    ourselves through ``httpx`` is the simplest reliable fix — we control
+    every byte that goes onto the wire.
+
+    Returns ``(file_id, file_path, url)`` — same shape the rest of the
+    codebase already expects.
 
     When ``verify`` is True, immediately fetches the file back via a signed
     URL and logs a loud warning if magic bytes / size don't match the
-    upload — this is the single most useful diagnostic for "file uploads
-    fine but downloads as garbage" bugs.
+    upload. Verification failures are logged, not raised.
 
-    Raises ``StorageError`` if the upload itself fails or returns an unusable
-    response. Verification failures are *logged but not raised* so that a
-    flaky verification step never breaks an otherwise-working upload.
+    Raises ``StorageError`` if the upload itself fails or returns an
+    unusable response.
     """
-    client = get_imagekit()
-
     target_folder = f"/imagify/{folder}"
     if task_id:
         target_folder = f"{target_folder}/{task_id}"
@@ -168,40 +170,58 @@ def upload_file(
         filename, len(file_bytes), mime_type, _hex_preview(file_bytes), target_folder,
     )
 
+    safe_mime = mime_type or "application/octet-stream"
+    files = {"file": (filename, file_bytes, safe_mime)}
+    data = {
+        "fileName": filename,
+        "folder": target_folder,
+        "useUniqueFileName": "true",
+    }
+
     try:
-        response: UploadFileResponse = client.upload_file(
-            file=file_bytes,
-            file_name=filename,
-            options=UploadFileRequestOptions(
-                folder=target_folder,
-                use_unique_file_name=True,
-            ),
-        )
-    except Exception as exc:
-        logger.exception("ImageKit SDK raised during upload of %s", filename)
+        with httpx.Client(timeout=120.0) as c:
+            resp = c.post(
+                _IMAGEKIT_UPLOAD_ENDPOINT,
+                # Basic auth: private_key as username, empty password.
+                auth=(settings.IMAGEKIT_PRIVATE_KEY, ""),
+                files=files,
+                data=data,
+            )
+    except httpx.HTTPError as exc:
+        logger.exception("ImageKit upload HTTP failed for %s", filename)
         raise StorageError(f"Storage upload failed: {exc}") from exc
 
-    if getattr(response, "error", None):
-        logger.error("ImageKit upload failed: %s", response.error)
-        raise StorageError(f"Storage upload failed: {response.error}")
+    if resp.status_code >= 400:
+        # ImageKit returns a JSON error body — capture for diagnostics.
+        try:
+            err_body = resp.text[:500]
+        except Exception:
+            err_body = "<unreadable>"
+        logger.error(
+            "ImageKit upload returned %s for %s: %s",
+            resp.status_code, filename, err_body,
+        )
+        raise StorageError(
+            f"Storage upload failed (HTTP {resp.status_code}): {err_body}"
+        )
 
-    file_id = getattr(response, "file_id", None)
-    file_path = getattr(response, "file_path", None)
-    url = getattr(response, "url", None)
+    try:
+        body = resp.json()
+    except Exception as exc:
+        logger.error("ImageKit upload returned non-JSON body: %s", resp.text[:300])
+        raise StorageError("Storage upload returned a non-JSON response") from exc
+
+    file_id = body.get("fileId")
+    file_path = body.get("filePath")
+    url = body.get("url") or ""
 
     if not file_id or not file_path:
-        # Without these, we cannot generate a signed URL later — fail loudly.
         logger.error(
-            "ImageKit returned incomplete upload response: file_id=%s file_path=%s url=%s",
-            file_id, file_path, url,
+            "ImageKit returned incomplete upload response: %s", body,
         )
         raise StorageError("Storage upload returned incomplete response (missing file metadata)")
 
-    if not url:
-        # Some SDK versions / private accounts may not return a URL — we'll
-        # always re-sign on download anyway, so this is just a warning.
-        logger.warning("ImageKit upload missing url field for file_path=%s; will sign on demand", file_path)
-        url = ""
+    logger.info("Upload OK: file_id=%s file_path=%s", file_id, file_path)
 
     if verify:
         _verify_uploaded_bytes(file_path, file_bytes, mime_type=mime_type, filename=filename)
