@@ -24,6 +24,8 @@ logger = logging.getLogger("imagify.task_helpers")
 
 SHARED_TMP = Path("/tmp/imagify")
 MAX_FILE_BYTES = 50 * 1024 * 1024
+# Read uploads in 1 MiB blocks so peak memory per file never exceeds this.
+UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 def ensure_tmp() -> Path:
@@ -32,20 +34,84 @@ def ensure_tmp() -> Path:
 
 
 async def read_upload(file: UploadFile, *, allowed_mime: set[str] | None = None) -> tuple[bytes, str, str]:
-    """Read an UploadFile; enforce size + optional mime whitelist. Returns (data, filename, mime)."""
-    data = await file.read()
-    if len(data) > MAX_FILE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File exceeds {MAX_FILE_BYTES // 1024 // 1024}MB limit",
-        )
+    """Read an UploadFile; enforce size + optional mime whitelist. Returns (data, filename, mime).
+
+    Reads in chunks so a 50 MiB upload never lands in memory as a single
+    contiguous read. Aborts mid-stream as soon as ``MAX_FILE_BYTES`` is
+    exceeded so an attacker can't OOM us by claiming a small Content-Length
+    and sending more.
+    """
     mime = file.content_type or "application/octet-stream"
     if allowed_mime and mime not in allowed_mime:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"Unsupported file type: {mime}",
         )
+
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_FILE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File exceeds {MAX_FILE_BYTES // 1024 // 1024}MB limit",
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
     return data, file.filename or "upload.bin", mime
+
+
+async def spool_upload_to_disk(
+    file: UploadFile,
+    *,
+    allowed_mime: set[str] | None = None,
+) -> tuple[Path, str, str, int]:
+    """Stream an UploadFile into a temp file. Returns (path, filename, mime, size).
+
+    Use this when handling many uploads in one request so the request
+    handler never has to hold all file bodies in memory at once. The
+    returned path is in ``SHARED_TMP`` and has a uuid-prefixed name; the
+    caller is responsible for ``Path(path).unlink(missing_ok=True)`` once
+    done.
+    """
+    mime = file.content_type or "application/octet-stream"
+    if allowed_mime and mime not in allowed_mime:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Unsupported file type: {mime}",
+        )
+
+    ensure_tmp()
+    safe_name = Path(file.filename or "upload.bin").name
+    target = SHARED_TMP / f"{uuid.uuid4().hex}_{safe_name}"
+    total = 0
+    try:
+        # Open in binary mode and write the upload in chunks so peak memory
+        # is bounded regardless of file size.
+        with target.open("wb") as fh:
+            while True:
+                chunk = await file.read(UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_FILE_BYTES:
+                    fh.close()
+                    target.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"File exceeds {MAX_FILE_BYTES // 1024 // 1024}MB limit",
+                    )
+                fh.write(chunk)
+    except HTTPException:
+        raise
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return target, file.filename or "upload.bin", mime, total
 
 
 def stash_bytes(data: bytes, filename: str) -> Path:
@@ -185,8 +251,10 @@ def finalize_task_sync(
     filename: str,
     mime_type: str,
 ) -> ProcessedFile:
-    """Worker-side finalize. On storage failure, marks the task FAILED and
-    re-raises StorageError so the Celery task retry policy can catch it.
+    """Worker-side finalize. Re-raises StorageError on upload failure so the
+    Celery task's retry policy can catch it. The caller is responsible for
+    persisting FAILED state only when no retries remain (use
+    ``record_task_attempt_failure_sync`` in the task's ``except`` block).
     """
     try:
         file_id, file_path, url = storage_service.upload_file(
@@ -194,7 +262,9 @@ def finalize_task_sync(
         )
     except StorageError as exc:
         logger.error("Worker storage upload failed for task %s: %s", task.id, exc)
-        task.status = TaskStatus.FAILED
+        # Don't mark FAILED here — let the Celery task decide based on its
+        # remaining retry budget. Just stash the latest error so it shows
+        # up in the polling response.
         task.error_message = f"Storage upload failed: {exc}"[:1000]
         db.commit()
         raise
@@ -218,8 +288,40 @@ def finalize_task_sync(
 
 
 def mark_task_failed_sync(db: Session, task: Task, error: str) -> None:
+    """Force-mark a task FAILED with an error message. Use only when there
+    will be no further retry — see ``record_task_attempt_failure_sync``
+    for the retry-aware variant."""
     task.status = TaskStatus.FAILED
     task.error_message = error[:1000]
+    db.commit()
+
+
+def record_task_attempt_failure_sync(
+    db: Session,
+    task: Task,
+    error: str,
+    *,
+    retries: int,
+    max_retries: int,
+) -> None:
+    """Record an attempt failure without prematurely marking the task FAILED.
+
+    While a Celery task still has retries left, we only update the
+    ``error_message`` (so logs/UI can see why the previous attempt failed)
+    and keep ``status=IN_PROGRESS``. Once the final retry is exhausted, the
+    task is persisted as FAILED so the client stops polling.
+
+    Pass ``retries=self.request.retries`` and ``max_retries=self.max_retries``
+    from a Celery ``bind=True`` task.
+    """
+    is_final_attempt = retries >= (max_retries or 0)
+    task.error_message = error[:1000]
+    if is_final_attempt:
+        task.status = TaskStatus.FAILED
+    else:
+        # Keep IN_PROGRESS so polling clients don't give up; the worker
+        # will reset progress on the next attempt.
+        task.status = TaskStatus.IN_PROGRESS
     db.commit()
 
 

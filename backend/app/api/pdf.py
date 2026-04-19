@@ -10,11 +10,14 @@ from app.models.task import TaskType
 from app.models.user import User
 from app.schemas.pdf import AsyncEnqueuedOut, SyncResultOut
 from app.services import pdf_service
+from app.services.page_selector import parse_page_selector
 from app.services.pdf_service import PdfServiceError
 from app.services.task_helpers import (
     create_pending_task_async,
     read_upload,
     record_sync_result,
+    remove_stashed,
+    spool_upload_to_disk,
     stash_bytes,
 )
 
@@ -49,14 +52,23 @@ async def merge(
 ) -> SyncResultOut:
     if not 2 <= len(files) <= 10:
         raise HTTPException(status_code=400, detail="Provide between 2 and 10 PDF files")
-    datas: list[bytes] = []
-    for f in files:
-        data, _, _ = await read_upload(f, allowed_mime=PDF_MIME)
-        datas.append(data)
+
+    # Spool each upload to disk so we never hold all PDF bodies in memory at
+    # once. PdfReader reads pages lazily from the path, keeping peak memory
+    # bounded by the largest single document being touched.
+    spooled_paths: list = []
     try:
-        merged = pdf_service.merge_pdfs(datas)
-    except PdfServiceError as exc:
-        raise _service_error(exc)
+        for f in files:
+            path, _, _, _ = await spool_upload_to_disk(f, allowed_mime=PDF_MIME)
+            spooled_paths.append(path)
+        try:
+            merged = pdf_service.merge_pdfs_from_paths([str(p) for p in spooled_paths])
+        except PdfServiceError as exc:
+            raise _service_error(exc)
+    finally:
+        for p in spooled_paths:
+            remove_stashed(p)
+
     task, pf = await record_sync_result(
         db, user_id=user.id, task_type=TaskType.PDF,
         result_bytes=merged, filename="merged.pdf", mime_type="application/pdf",
@@ -99,13 +111,17 @@ async def split(
 async def rotate(
     file: UploadFile = File(...),
     degrees: int = Form(..., description="90, 180, or 270"),
-    pages: str | None = Form(None, description="Comma-separated page numbers, or empty for all"),
+    pages: str | None = Form(
+        None,
+        description="Page selector. Supports comma-separated ints and hyphen "
+                    "ranges, e.g. '1,3,5-7'. Empty/omitted = all pages.",
+    ),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SyncResultOut:
     data, _, _ = await read_upload(file, allowed_mime=PDF_MIME)
     try:
-        page_list = [int(p) for p in pages.split(",")] if pages else None
+        page_list = parse_page_selector(pages) if pages and pages.strip() else None
         rotated = pdf_service.rotate_pdf(data, page_list, degrees)
     except PdfServiceError as exc:
         raise _service_error(exc)
@@ -171,14 +187,22 @@ async def from_images(
 ) -> SyncResultOut:
     if not 1 <= len(files) <= 50:
         raise HTTPException(status_code=400, detail="Provide between 1 and 50 images")
-    datas: list[bytes] = []
-    for f in files:
-        data, _, _ = await read_upload(f, allowed_mime=IMAGE_MIMES)
-        datas.append(data)
+
+    spooled_paths: list = []
     try:
-        out = pdf_service.images_to_pdf(datas, page_size=page_size)  # type: ignore[arg-type]
-    except PdfServiceError as exc:
-        raise _service_error(exc)
+        for f in files:
+            path, _, _, _ = await spool_upload_to_disk(f, allowed_mime=IMAGE_MIMES)
+            spooled_paths.append(path)
+        try:
+            out = pdf_service.images_to_pdf_from_paths(
+                [str(p) for p in spooled_paths], page_size=page_size,  # type: ignore[arg-type]
+            )
+        except PdfServiceError as exc:
+            raise _service_error(exc)
+    finally:
+        for p in spooled_paths:
+            remove_stashed(p)
+
     task, pf = await record_sync_result(
         db, user_id=user.id, task_type=TaskType.PDF,
         result_bytes=out, filename="from_images.pdf", mime_type="application/pdf",
@@ -306,3 +330,5 @@ def _parse_ranges(raw: str) -> list[tuple[int, int]]:
     if not result:
         raise PdfServiceError("No valid ranges provided")
     return result
+
+

@@ -108,18 +108,52 @@ def get_signed_url(file_path: str, expire_seconds: int = 3600) -> str:
     return signed
 
 
-def delete_file(file_id: str) -> bool:
-    """Delete a file from ImageKit by its file ID."""
+class DeleteResult:
+    """Outcome of a ``delete_file`` call.
+
+    - ``ok``: server acknowledged deletion (204) — safe to drop the DB row.
+    - ``not_found``: file already absent on ImageKit (404) — also safe to
+      drop the DB row, the storage state is already what we want.
+    - ``transient``: network/5xx/auth issue — KEEP the DB row so a future
+      cleanup pass can retry. ``reason`` carries an actionable message.
+    - ``permanent``: ImageKit rejected with a non-retryable error — KEEP
+      the row so an operator can inspect.
+    """
+
+    __slots__ = ("status", "reason")
+
+    def __init__(self, status: str, reason: str = "") -> None:
+        self.status = status
+        self.reason = reason
+
+    @property
+    def is_safe_to_drop(self) -> bool:
+        return self.status in ("ok", "not_found")
+
+
+def delete_file(file_id: str) -> DeleteResult:
+    """Delete a file from ImageKit by its file ID. See ``DeleteResult``."""
     if not file_id:
-        return False
+        return DeleteResult("permanent", "empty file_id")
     client = get_imagekit()
     try:
         response = client.delete_file(file_id)
-        # ImageKit returns 204 No Content on success
-        return getattr(response, "status_code", None) == 204
     except Exception as e:
-        logger.error("Failed to delete file %s from ImageKit: %s", file_id, str(e))
-        return False
+        msg = f"{type(e).__name__}: {e}"
+        logger.warning("ImageKit delete %s raised: %s", file_id, msg)
+        return DeleteResult("transient", msg)
+
+    code = getattr(response, "status_code", None)
+    if code == 204:
+        return DeleteResult("ok")
+    if code == 404:
+        # Already gone — treat as success for cleanup purposes.
+        return DeleteResult("not_found", "ImageKit returned 404 (already absent)")
+    if code in (401, 403):
+        return DeleteResult("permanent", f"ImageKit returned {code} (auth/permission)")
+    if code in (429, 500, 502, 503, 504):
+        return DeleteResult("transient", f"ImageKit returned {code}")
+    return DeleteResult("permanent", f"ImageKit returned unexpected status {code}")
 
 
 def storage_healthcheck() -> tuple[bool, str]:

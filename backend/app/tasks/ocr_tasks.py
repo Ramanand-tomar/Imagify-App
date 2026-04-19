@@ -11,7 +11,7 @@ from app.services import ocr_service
 from app.services.task_helpers import (
     finalize_task_sync,
     load_stashed,
-    mark_task_failed_sync,
+    record_task_attempt_failure_sync,
     remove_stashed_unless_retrying,
 )
 
@@ -55,12 +55,24 @@ def extract_pdf_text_task(
             text_result = ocr_service.extract_text_from_pdf(data, language=language)
             result_bytes = text_result.encode("utf-8")
         except Exception as exc:
-            mark_task_failed_sync(session, task, str(exc))
+            record_task_attempt_failure_sync(
+                session, task, str(exc),
+                retries=self.request.retries,
+                max_retries=self.max_retries or 0,
+            )
             raise
 
         stem = Path(original_filename).stem or "extracted"
         out_name = f"{stem}_text.txt"
-        finalize_task_sync(session, task, result_bytes, out_name, "text/plain")
+        try:
+            finalize_task_sync(session, task, result_bytes, out_name, "text/plain")
+        except Exception as exc:
+            record_task_attempt_failure_sync(
+                session, task, str(exc),
+                retries=self.request.retries,
+                max_retries=self.max_retries or 0,
+            )
+            raise
         succeeded = True
         return "ok"
     finally:

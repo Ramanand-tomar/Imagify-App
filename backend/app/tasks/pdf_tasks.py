@@ -17,7 +17,7 @@ from app.services import pdf_service
 from app.services.task_helpers import (
     finalize_task_sync,
     load_stashed,
-    mark_task_failed_sync,
+    record_task_attempt_failure_sync,
     remove_stashed_unless_retrying,
 )
 
@@ -60,11 +60,23 @@ def compress_pdf_task(
             data = load_stashed(stash_path)
             compressed = pdf_service.compress_pdf(data, quality=quality)  # type: ignore[arg-type]
         except Exception as exc:
-            mark_task_failed_sync(session, task, str(exc))
+            record_task_attempt_failure_sync(
+                session, task, str(exc),
+                retries=self.request.retries,
+                max_retries=self.max_retries or 0,
+            )
             raise
 
         out_name = _with_suffix(original_filename, "-compressed.pdf")
-        finalize_task_sync(session, task, compressed, out_name, "application/pdf")
+        try:
+            finalize_task_sync(session, task, compressed, out_name, "application/pdf")
+        except Exception as exc:
+            record_task_attempt_failure_sync(
+                session, task, str(exc),
+                retries=self.request.retries,
+                max_retries=self.max_retries or 0,
+            )
+            raise
         succeeded = True
         return "ok"
     finally:
@@ -112,7 +124,11 @@ def pdf_to_jpg_task(
             data = load_stashed(stash_path)
             pages = pdf_service.pdf_to_jpg(data, dpi=dpi, quality=quality)
         except Exception as exc:
-            mark_task_failed_sync(session, task, str(exc))
+            record_task_attempt_failure_sync(
+                session, task, str(exc),
+                retries=self.request.retries,
+                max_retries=self.max_retries or 0,
+            )
             raise
 
         buf = io.BytesIO()
@@ -120,7 +136,15 @@ def pdf_to_jpg_task(
             for p in pages:
                 zf.writestr(p.filename, p.bytes)
         out_name = _with_suffix(original_filename, "-pages.zip")
-        finalize_task_sync(session, task, buf.getvalue(), out_name, "application/zip")
+        try:
+            finalize_task_sync(session, task, buf.getvalue(), out_name, "application/zip")
+        except Exception as exc:
+            record_task_attempt_failure_sync(
+                session, task, str(exc),
+                retries=self.request.retries,
+                max_retries=self.max_retries or 0,
+            )
+            raise
         succeeded = True
         return "ok"
     finally:

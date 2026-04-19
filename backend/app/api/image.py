@@ -20,6 +20,7 @@ from app.services.task_helpers import (
     ensure_tmp,
     read_upload,
     record_sync_result,
+    spool_upload_to_disk,
     stash_bytes,
 )
 
@@ -39,9 +40,12 @@ async def batch_image(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BatchTaskStartedOut:
-    if len(files) > 5:
-        raise HTTPException(status_code=400, detail="Batch limit is 5 files")
-    
+    # Per-endpoint cap reflects container capacity: 5 files * 50 MiB ceiling
+    # = 250 MiB peak disk usage per request, with bounded RAM use because each
+    # file is streamed straight to a temp file and never loaded fully.
+    if not 1 <= len(files) <= 5:
+        raise HTTPException(status_code=400, detail="Batch limit is 1-5 files")
+
     import json
     try:
         params = json.loads(params_json)
@@ -52,16 +56,15 @@ async def batch_image(
     task_ids = []
 
     from app.tasks.image_tasks import batch_image_task
-    
+
+    # Stream each upload directly to disk (no full-body read in memory) so
+    # peak RAM stays bounded regardless of file count or size.
     for file in files:
-        data, filename, _ = await read_upload(file, allowed_mime=IMAGE_MIMES)
-        stash_path = stash_bytes(data, filename)
-        
-        # Create a pending task for each file
+        stash_path, filename, _, _ = await spool_upload_to_disk(file, allowed_mime=IMAGE_MIMES)
+
         task = await create_pending_task_async(db, user_id=user.id, task_type=TaskType.IMAGE, batch_id=batch_id)
         task_ids.append(task.id)
-        
-        # Enqueue fan-out
+
         async_result = batch_image_task.delay(
             str(task.id), str(stash_path), operation, params, filename
         )

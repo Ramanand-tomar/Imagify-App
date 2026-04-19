@@ -23,9 +23,25 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.1
 
+  # Dedicated beat scheduler. Must be a single instance (Render's "worker"
+  # type runs one container) so we never enqueue scheduled jobs more than
+  # once. Drives the daily ImageKit cleanup tick.
+  - type: worker
+    name: imagify-beat
+    env: python
+    rootDir: backend
+    buildCommand: ./build.sh
+    startCommand: celery -A app.core.celery_app beat --loglevel=info
+    envVars:
+      - fromGroup: imagify-env
+      - key: PYTHON_VERSION
+        value: 3.12.1
+
 envGroups:
   - name: imagify-env
     envVars:
+      - key: ENVIRONMENT
+        value: production
       - key: DATABASE_URL
         sync: false
       - key: SYNC_DATABASE_URL
@@ -42,5 +58,9 @@ envGroups:
         sync: false
       - key: IMAGEKIT_URL_ENDPOINT
         sync: false
+      # Strict CORS allowlist — startup refuses '*' in production. Replace
+      # with your real client origins (mobile dev tunnel, web app, etc).
       - key: CORS_ORIGINS
-        value: "*"
+        sync: false
+      - key: CORS_ALLOW_CREDENTIALS
+        value: "true"

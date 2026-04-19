@@ -47,6 +47,28 @@ def merge_pdfs(files: list[bytes]) -> bytes:
     return _write(writer)
 
 
+def merge_pdfs_from_paths(paths: list[str]) -> bytes:
+    """Like ``merge_pdfs`` but reads each source from a file path instead of
+    holding all bodies in memory at once. ``pypdf.PdfReader`` opens the file
+    by path so memory peak is bounded by the largest single document being
+    referenced — not the sum of all inputs.
+    """
+    if not paths:
+        raise PdfServiceError("At least one file required")
+    if len(paths) > 10:
+        raise PdfServiceError("Maximum 10 files can be merged at once")
+    writer = PdfWriter()
+    for path in paths:
+        try:
+            # PdfReader keeps the file handle open; pages are read lazily.
+            reader = PdfReader(path)
+        except PdfReadError as exc:
+            raise PdfServiceError(f"Invalid PDF: {exc}") from exc
+        for page in reader.pages:
+            writer.add_page(page)
+    return _write(writer)
+
+
 def split_pdf(data: bytes, ranges: list[tuple[int, int]]) -> list[bytes]:
     """Split by 1-indexed inclusive page ranges. Returns one PDF per range."""
     if not ranges:
@@ -195,6 +217,49 @@ def images_to_pdf(
             oy = (target[1] - img.height) // 2
             canvas.paste(img, (ox, oy))
             pil_pages.append(canvas)
+
+    buf = io.BytesIO()
+    pil_pages[0].save(buf, format="PDF", save_all=True, append_images=pil_pages[1:])
+    return buf.getvalue()
+
+
+def images_to_pdf_from_paths(
+    paths: list[str],
+    page_size: Literal["A4", "Letter", "fit"] = "A4",
+) -> bytes:
+    """Like ``images_to_pdf`` but reads each image from disk one at a time.
+
+    Image bytes are released as soon as PIL has decoded them; only the
+    canvases (smaller, page-sized) accumulate. This keeps peak memory
+    bounded at ``len(images) * page-canvas-size`` plus one input image,
+    instead of holding all original bytes in RAM simultaneously.
+    """
+    if not paths:
+        raise PdfServiceError("At least one image required")
+    if len(paths) > 50:
+        raise PdfServiceError("Maximum 50 images allowed")
+
+    sizes = {"A4": (595, 842), "Letter": (612, 792)}
+    pil_pages: list[Image.Image] = []
+
+    for path in paths:
+        try:
+            with Image.open(path) as src:
+                img = src.convert("RGB")
+        except Exception as exc:
+            raise PdfServiceError(f"Invalid image: {exc}") from exc
+
+        if page_size == "fit":
+            pil_pages.append(img)
+        else:
+            target = sizes[page_size]
+            canvas = Image.new("RGB", target, "white")
+            img.thumbnail(target, Image.Resampling.LANCZOS)
+            ox = (target[0] - img.width) // 2
+            oy = (target[1] - img.height) // 2
+            canvas.paste(img, (ox, oy))
+            pil_pages.append(canvas)
+            img.close()
 
     buf = io.BytesIO()
     pil_pages[0].save(buf, format="PDF", save_all=True, append_images=pil_pages[1:])

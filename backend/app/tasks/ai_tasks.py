@@ -15,7 +15,7 @@ from app.services import ai_service
 from app.services.task_helpers import (
     finalize_task_sync,
     load_stashed,
-    mark_task_failed_sync,
+    record_task_attempt_failure_sync,
     remove_stashed_unless_retrying,
 )
 
@@ -62,11 +62,23 @@ def super_resolution_task(
             data = load_stashed(stash_path)
             out_bytes = ai_service.super_resolve(data, scale=scale)
         except Exception as exc:
-            mark_task_failed_sync(session, task, str(exc))
+            record_task_attempt_failure_sync(
+                session, task, str(exc),
+                retries=self.request.retries,
+                max_retries=self.max_retries or 0,
+            )
             raise
 
         out_name = _with_suffix(original_filename, f"-x{scale}.png")
-        finalize_task_sync(session, task, out_bytes, out_name, "image/png")
+        try:
+            finalize_task_sync(session, task, out_bytes, out_name, "image/png")
+        except Exception as exc:
+            record_task_attempt_failure_sync(
+                session, task, str(exc),
+                retries=self.request.retries,
+                max_retries=self.max_retries or 0,
+            )
+            raise
         succeeded = True
         return "ok"
     finally:
@@ -112,11 +124,23 @@ def low_light_enhance_task(
             data = load_stashed(stash_path)
             out_bytes = ai_service.low_light_enhance(data, strength=strength)
         except Exception as exc:
-            mark_task_failed_sync(session, task, str(exc))
+            record_task_attempt_failure_sync(
+                session, task, str(exc),
+                retries=self.request.retries,
+                max_retries=self.max_retries or 0,
+            )
             raise
 
         out_name = _with_suffix(original_filename, "-lowlight.png")
-        finalize_task_sync(session, task, out_bytes, out_name, "image/png")
+        try:
+            finalize_task_sync(session, task, out_bytes, out_name, "image/png")
+        except Exception as exc:
+            record_task_attempt_failure_sync(
+                session, task, str(exc),
+                retries=self.request.retries,
+                max_retries=self.max_retries or 0,
+            )
+            raise
         succeeded = True
         return "ok"
     finally:
