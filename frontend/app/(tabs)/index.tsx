@@ -1,6 +1,6 @@
 import { useRouter, type Href } from "expo-router";
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Icon } from "react-native-paper";
 
 import { ServerStatusBanner } from "@/components/ServerStatusBanner";
@@ -17,8 +17,9 @@ import {
 import { useSnackbar } from "@/providers/SnackbarProvider";
 import { pingServer } from "@/services/api";
 import { useAuthStore } from "@/stores/authStore";
-import { useTaskStore } from "@/stores/taskStore";
+import { useTaskStore, type Task } from "@/stores/taskStore";
 import { useAppTheme } from "@/theme/useTheme";
+import { extractErrorMessage } from "@/utils/errors";
 import { createLogger } from "@/utils/logger";
 
 const log = createLogger("Home");
@@ -53,8 +54,35 @@ export default function HomeScreen() {
   const snackbar = useSnackbar();
   const history = useTaskStore((s) => s.history);
   const loadHistory = useTaskStore((s) => s.loadHistory);
+  const deleteTask = useTaskStore((s) => s.deleteTask);
   const user = useAuthStore((s) => s.user);
   const [wakingUp, setWakingUp] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const onDeleteTask = (task: Task) => {
+    Alert.alert(
+      "Delete this task?",
+      "The processed file will be removed from storage and your history.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setDeletingId(task.id);
+            try {
+              await deleteTask(task.id);
+              snackbar.success("Task deleted");
+            } catch (err) {
+              snackbar.error(extractErrorMessage(err, "Couldn't delete task"));
+            } finally {
+              setDeletingId(null);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   useEffect(() => {
     let active = true;
@@ -146,7 +174,12 @@ export default function HomeScreen() {
         ) : (
           <View style={{ gap: 10 }}>
             {history.slice(0, 5).map((task) => (
-              <TaskProgressCard key={task.id} task={task} />
+              <TaskProgressCard
+                key={task.id}
+                task={task}
+                onDelete={onDeleteTask}
+                deleting={deletingId === task.id}
+              />
             ))}
           </View>
         )}

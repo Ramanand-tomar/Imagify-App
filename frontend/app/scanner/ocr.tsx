@@ -18,7 +18,6 @@ import {
 import { useSnackbar } from "@/providers/SnackbarProvider";
 import { api } from "@/services/api";
 import { ocrService } from "@/services/ocrService";
-import { useAuthStore } from "@/stores/authStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useAppTheme } from "@/theme/useTheme";
 import { resolveUrl } from "@/utils/env";
@@ -75,10 +74,11 @@ export default function OCRScreen() {
     try {
       const res = await api.get<{ download_url: string }>(`/tasks/${id}/result`);
       if (!res.data?.download_url) throw new Error("Missing download_url");
-      const token = useAuthStore.getState().accessToken;
-      const response = await fetch(resolveUrl(res.data.download_url), {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
+      // Use a fresh fetch with NO auth header — backend now returns a
+      // direct ImageKit signed URL, and ImageKit can choke on unexpected
+      // Authorization headers. The signature in the URL is the access token.
+      const url = resolveUrl(res.data.download_url);
+      const response = await fetch(url);
       if (!response.ok) throw new Error(`Download failed (HTTP ${response.status})`);
       setResult(await response.text());
     } catch (err) {
@@ -97,7 +97,10 @@ export default function OCRScreen() {
         const res = await ocrService.extractFromPdf(file.uri, file.name, language);
         setTaskId(res.task_id);
       } else {
-        const data = await ocrService.extractFromImage(file.uri, file.name, language);
+        // Pass the real picked mime type — server validates against an allowlist.
+        const data = await ocrService.extractFromImage(
+          file.uri, file.name, file.mimeType, language,
+        );
         setResult(data.text);
         setLoading(false);
       }

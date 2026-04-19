@@ -34,6 +34,11 @@ export interface BatchStatus {
   tasks: Task[];
 }
 
+export interface StorageUsage {
+  total_bytes: number;
+  file_count: number;
+}
+
 interface TaskState {
   active: Record<string, Task>;
   history: Task[];
@@ -44,6 +49,8 @@ interface TaskState {
   pollTask: (id: string, intervalMs?: number) => () => void;
   pollBatch: (batchId: string, onUpdate: (status: BatchStatus) => void, intervalMs?: number) => () => void;
   loadHistory: (page?: number) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
+  getStorageUsage: () => Promise<StorageUsage>;
   reset: () => void;
 }
 
@@ -152,6 +159,25 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     const { data } = await api.get<{ items: Task[] }>(`/tasks/history`, { params: { page } });
     const items = Array.isArray(data?.items) ? data.items : [];
     set({ history: items, historyLoaded: true });
+  },
+
+  deleteTask: async (id) => {
+    await api.delete(`/tasks/${id}`);
+    set((state) => {
+      const { [id]: _, ...active } = state.active;
+      return {
+        active,
+        history: state.history.filter((t) => t.id !== id),
+      };
+    });
+  },
+
+  getStorageUsage: async () => {
+    const { data } = await api.get<StorageUsage>(`/tasks/storage-usage`);
+    return {
+      total_bytes: Number(data?.total_bytes ?? 0),
+      file_count: Number(data?.file_count ?? 0),
+    };
   },
 
   reset: () => set({ active: {}, history: [], historyLoaded: false }),

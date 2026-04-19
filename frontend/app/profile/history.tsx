@@ -1,8 +1,6 @@
 import { useRouter } from "expo-router";
-import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { Icon } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -11,10 +9,9 @@ import { AppHeader, Badge, Card, EmptyState, Text } from "@/components/ui";
 import type { BadgeTone } from "@/components/ui";
 import { useSnackbar } from "@/providers/SnackbarProvider";
 import { api } from "@/services/api";
-import { useAuthStore } from "@/stores/authStore";
+import { downloadResultToCache, openInViewer, saveToDevice } from "@/services/fileService";
 import { useTaskStore, type Task } from "@/stores/taskStore";
 import { useAppTheme } from "@/theme/useTheme";
-import { resolveUrl } from "@/utils/env";
 import { extractErrorMessage, isAuthError } from "@/utils/errors";
 import { createLogger } from "@/utils/logger";
 
@@ -59,6 +56,7 @@ export default function TaskHistoryScreen() {
   const router = useRouter();
   const snackbar = useSnackbar();
   const history = useTaskStore((s) => s.history);
+  const deleteTask = useTaskStore((s) => s.deleteTask);
 
   const [items, setItems] = useState<Task[]>(history);
   const [page, setPage] = useState(1);
@@ -66,6 +64,7 @@ export default function TaskHistoryScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchPage = useCallback(
     async (targetPage: number, mode: "initial" | "refresh" | "more") => {
@@ -112,14 +111,10 @@ export default function TaskHistoryScreen() {
     return ageMs > EXPIRY_DAYS * 24 * 60 * 60 * 1000;
   };
 
-  const onDownload = async (task: Task) => {
+  const fetchAndDownload = async (task: Task): Promise<{ uri: string; mime: string; name: string } | null> => {
     if (isExpired(task.created_at)) {
       snackbar.error("This download link has expired");
-      return;
-    }
-    if (!FileSystem.cacheDirectory) {
-      snackbar.error("Device storage unavailable");
-      return;
+      return null;
     }
     try {
       const { data } = await api.get<{
@@ -127,33 +122,9 @@ export default function TaskHistoryScreen() {
         original_filename: string;
         mime_type: string;
       }>(`/tasks/${task.id}/result`);
-
-      if (!data?.download_url) {
-        throw new Error("Download URL missing from server response");
-      }
-
-      const target = `${FileSystem.cacheDirectory}${data.original_filename}`;
-      await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
-
-      const token = useAuthStore.getState().accessToken;
-      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-      const result = await FileSystem.downloadAsync(resolveUrl(data.download_url), target, { headers });
-      if (result.status >= 400) {
-        if (result.status === 401 || result.status === 403) {
-          snackbar.error("Your session expired. Please sign in again.");
-          return;
-        }
-        throw new Error(`Download failed (HTTP ${result.status})`);
-      }
-      if (!(await Sharing.isAvailableAsync())) {
-        snackbar.info(`Saved to cache: ${data.original_filename}`);
-        return;
-      }
-      await Sharing.shareAsync(result.uri, {
-        mimeType: data.mime_type,
-        dialogTitle: `Save ${data.original_filename}`,
-        UTI: data.mime_type,
-      });
+      if (!data?.download_url) throw new Error("Download URL missing from server response");
+      const uri = await downloadResultToCache(data.download_url, data.original_filename);
+      return { uri, mime: data.mime_type, name: data.original_filename };
     } catch (err) {
       log.warn("Download failed", err);
       if (isAuthError(err)) {
@@ -161,7 +132,58 @@ export default function TaskHistoryScreen() {
       } else {
         snackbar.error(extractErrorMessage(err, "Couldn't download result"));
       }
+      return null;
     }
+  };
+
+  const onSave = async (task: Task) => {
+    const got = await fetchAndDownload(task);
+    if (!got) return;
+    try {
+      const where = await saveToDevice(got.uri, got.mime, got.name);
+      snackbar.success(where);
+    } catch (err) {
+      snackbar.error(extractErrorMessage(err, "Save failed"));
+    }
+  };
+
+  const onView = async (task: Task) => {
+    const got = await fetchAndDownload(task);
+    if (!got) return;
+    try {
+      const opened = await openInViewer(got.uri, got.mime);
+      if (!opened) snackbar.info("This file type can't be previewed inline");
+    } catch (err) {
+      snackbar.error(extractErrorMessage(err, "Couldn't open file"));
+    }
+  };
+
+  const onDelete = (task: Task) => {
+    Alert.alert(
+      "Delete this task?",
+      "The processed file will be removed from storage and your history.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setDeletingId(task.id);
+            try {
+              await deleteTask(task.id);
+              setItems((prev) => prev.filter((t) => t.id !== task.id));
+              setTotal((t) => (t === null ? t : Math.max(0, t - 1)));
+              snackbar.success("Task deleted");
+            } catch (err) {
+              log.warn("Delete failed", err);
+              snackbar.error(extractErrorMessage(err, "Couldn't delete task"));
+            } finally {
+              setDeletingId(null);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const renderItem = ({ item }: { item: Task }) => {
@@ -205,16 +227,30 @@ export default function TaskHistoryScreen() {
           <View style={styles.right}>
             <Badge label={label} tone={tone} />
             {success && !expired ? (
-              <Pressable
-                onPress={() => onDownload(item)}
-                hitSlop={8}
-                style={({ pressed }) => [
-                  styles.iconBtn,
-                  { backgroundColor: pressed ? theme.colors.brand[50] : "transparent" },
-                ]}
-              >
-                <Icon source="download" size={18} color={theme.colors.brand.default} />
-              </Pressable>
+              <>
+                <Pressable
+                  onPress={() => onView(item)}
+                  hitSlop={8}
+                  style={({ pressed }) => [
+                    styles.iconBtn,
+                    { backgroundColor: pressed ? theme.colors.brand[50] : "transparent" },
+                  ]}
+                  accessibilityLabel="View file"
+                >
+                  <Icon source="eye-outline" size={18} color={theme.colors.brand.default} />
+                </Pressable>
+                <Pressable
+                  onPress={() => onSave(item)}
+                  hitSlop={8}
+                  style={({ pressed }) => [
+                    styles.iconBtn,
+                    { backgroundColor: pressed ? theme.colors.brand[50] : "transparent" },
+                  ]}
+                  accessibilityLabel="Save file"
+                >
+                  <Icon source="content-save-outline" size={18} color={theme.colors.brand.default} />
+                </Pressable>
+              </>
             ) : null}
             {failed ? (
               <Pressable
@@ -225,6 +261,21 @@ export default function TaskHistoryScreen() {
                 <Icon source="restart" size={18} color={theme.colors.text.secondary} />
               </Pressable>
             ) : null}
+            <Pressable
+              onPress={() => onDelete(item)}
+              hitSlop={8}
+              disabled={deletingId === item.id}
+              style={({ pressed }) => [
+                styles.iconBtn,
+                {
+                  backgroundColor: pressed ? theme.colors.status.errorSoft : "transparent",
+                  opacity: deletingId === item.id ? 0.5 : 1,
+                },
+              ]}
+              accessibilityLabel="Delete task"
+            >
+              <Icon source="trash-can-outline" size={18} color={theme.colors.status.error} />
+            </Pressable>
           </View>
         </View>
       </Card>

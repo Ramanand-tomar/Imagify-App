@@ -1,13 +1,16 @@
-import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Icon, TextInput as PaperInput } from "react-native-paper";
+import * as Sharing from "expo-sharing";
 
 import { Badge, Button, Card, Text } from "@/components/ui";
-import { useAuthStore } from "@/stores/authStore";
+import {
+  downloadResultToCache,
+  openInViewer,
+  sanitizeFilename,
+  saveToDevice,
+} from "@/services/fileService";
 import { useAppTheme } from "@/theme/useTheme";
-import { resolveUrl } from "@/utils/env";
 import { extractErrorMessage, isAuthError } from "@/utils/errors";
 
 export interface ResultViewerProps {
@@ -31,93 +34,85 @@ function iconForMime(mime: string): string {
   return "file-outline";
 }
 
-/** Strip invalid filename chars. Empty result falls back to "file". */
-function sanitize(name: string): string {
-  const cleaned = name.trim().replace(/[\/\\:*?"<>|]/g, "").replace(/\s+/g, " ");
-  return cleaned || "file";
-}
-
 function splitExt(name: string): { base: string; ext: string } {
   const m = name.match(/\.[^.]+$/);
   if (!m) return { base: name, ext: "" };
   return { base: name.slice(0, m.index), ext: m[0] };
 }
 
-export function ResultViewer({ filename: serverFilename, mimeType, sizeBytes, downloadUrl }: ResultViewerProps) {
+type Busy = "view" | "save" | "share" | null;
+
+export function ResultViewer({
+  filename: serverFilename,
+  mimeType,
+  sizeBytes,
+  downloadUrl,
+}: ResultViewerProps) {
   const theme = useAppTheme();
   const initial = useMemo(() => splitExt(serverFilename), [serverFilename]);
 
   const [baseName, setBaseName] = useState(initial.base);
   const ext = initial.ext;
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState<"save" | "share" | null>(null);
+  const [busy, setBusy] = useState<Busy>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const effectiveName = sanitize(baseName) + ext;
+  const effectiveName = sanitizeFilename(baseName) + ext;
+  const isViewable = mimeType === "application/pdf" || mimeType.startsWith("text/");
 
-  const ensureLocalCopy = async (): Promise<string> => {
-    if (!FileSystem.cacheDirectory) {
-      throw new Error("Device storage is unavailable");
+  const ensureLocal = () => downloadResultToCache(downloadUrl, effectiveName);
+
+  const handleAction = async (
+    kind: Busy,
+    fn: () => Promise<string | void>,
+  ): Promise<void> => {
+    setError(null);
+    setInfo(null);
+    setBusy(kind);
+    try {
+      const message = await fn();
+      if (typeof message === "string" && message) setInfo(message);
+    } catch (e: unknown) {
+      setError(
+        isAuthError(e)
+          ? "Your session expired. Please sign in again."
+          : extractErrorMessage(e, `${kind ?? "Action"} failed`),
+      );
+    } finally {
+      setBusy(null);
     }
-    const target = `${FileSystem.cacheDirectory}${effectiveName}`;
-    await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
-    const token = useAuthStore.getState().accessToken;
-    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-    const resolved = resolveUrl(downloadUrl);
-    const result = await FileSystem.downloadAsync(resolved, target, { headers });
-    if (result.status >= 400) {
-      if (result.status === 401 || result.status === 403) {
-        throw new Error("Your session expired. Please sign in again.");
+  };
+
+  const onView = () =>
+    handleAction("view", async () => {
+      const local = await ensureLocal();
+      const opened = await openInViewer(local, mimeType);
+      if (!opened) throw new Error("No viewer available for this file type");
+    });
+
+  const onSave = () =>
+    handleAction("save", async () => {
+      const local = await ensureLocal();
+      return saveToDevice(local, mimeType, effectiveName);
+    });
+
+  const onShare = () =>
+    handleAction("share", async () => {
+      const local = await ensureLocal();
+      if (!(await Sharing.isAvailableAsync())) {
+        throw new Error("Sharing is not available on this device");
       }
-      throw new Error(`Download failed (HTTP ${result.status})`);
-    }
-    return result.uri;
-  };
-
-  const openShareSheet = async (dialogTitle: string) => {
-    const uri = await ensureLocalCopy();
-    if (!(await Sharing.isAvailableAsync())) {
-      throw new Error("Sharing is not available on this device");
-    }
-    await Sharing.shareAsync(uri, { mimeType, dialogTitle, UTI: mimeType });
-    return uri;
-  };
-
-  const onSave = async () => {
-    setError(null);
-    setInfo(null);
-    setBusy("save");
-    try {
-      await openShareSheet(`Save ${effectiveName}`);
-      setInfo(`Saved as ${effectiveName}`);
-    } catch (e: unknown) {
-      setError(isAuthError(e) ? "Your session expired. Please sign in again." : extractErrorMessage(e, "Save failed"));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const onShare = async () => {
-    setError(null);
-    setInfo(null);
-    setBusy("share");
-    try {
-      await openShareSheet(`Share ${effectiveName}`);
-    } catch (e: unknown) {
-      setError(isAuthError(e) ? "Your session expired. Please sign in again." : extractErrorMessage(e, "Share failed"));
-    } finally {
-      setBusy(null);
-    }
-  };
+      await Sharing.shareAsync(local, {
+        mimeType,
+        UTI: mimeType,
+        dialogTitle: `Share ${effectiveName}`,
+      });
+    });
 
   const commitRename = () => {
     const trimmed = baseName.trim();
-    if (!trimmed) {
-      setBaseName(initial.base);
-    } else {
-      setBaseName(sanitize(trimmed));
-    }
+    setBaseName(trimmed ? sanitizeFilename(trimmed) : initial.base);
     setEditing(false);
     setInfo(null);
   };
@@ -169,11 +164,7 @@ export function ResultViewer({ filename: serverFilename, mimeType, sizeBytes, do
               </Pressable>
             </View>
           ) : (
-            <Pressable
-              onPress={() => setEditing(true)}
-              style={styles.nameRow}
-              hitSlop={4}
-            >
+            <Pressable onPress={() => setEditing(true)} style={styles.nameRow} hitSlop={4}>
               <Text variant="titleMd" numberOfLines={1} style={{ flex: 1 }}>
                 {effectiveName}
               </Text>
@@ -187,10 +178,23 @@ export function ResultViewer({ filename: serverFilename, mimeType, sizeBytes, do
         <Badge label="Ready" tone="success" icon="check" />
       </View>
 
+      {isViewable ? (
+        <Button
+          label="View"
+          icon="eye-outline"
+          variant="soft"
+          onPress={onView}
+          loading={busy === "view"}
+          disabled={busy !== null}
+          fullWidth
+          style={{ marginTop: 16 }}
+        />
+      ) : null}
+
       <View style={styles.actions}>
         <Button
           label="Save"
-          icon="tray-arrow-down"
+          icon="content-save-outline"
           variant="secondary"
           onPress={onSave}
           loading={busy === "save"}
@@ -238,5 +242,5 @@ const styles = StyleSheet.create({
   editRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   editInput: { flex: 1, height: 36, fontSize: 14 },
   iconBtn: { width: 30, height: 30, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  actions: { flexDirection: "row", gap: 10, marginTop: 16 },
+  actions: { flexDirection: "row", gap: 10, marginTop: 12 },
 });

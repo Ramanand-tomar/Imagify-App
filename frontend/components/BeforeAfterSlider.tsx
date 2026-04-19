@@ -12,6 +12,10 @@ interface BeforeAfterSliderProps {
 }
 
 export function BeforeAfterSlider({ beforeUri, afterUri, aspectRatio = 4 / 3 }: BeforeAfterSliderProps) {
+  // Defend against 0/NaN/Infinity which would collapse the container's
+  // height to 0 and hide the image entirely. Caller passes width/height
+  // from the upload response — if either is missing we land here.
+  const safeAspect = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 4 / 3;
   const [width, setWidth] = useState(0);
   const dividerX = useSharedValue(0);
   const [ready, setReady] = useState(false);
@@ -39,7 +43,7 @@ export function BeforeAfterSlider({ beforeUri, afterUri, aspectRatio = 4 / 3 }: 
 
   return (
     <GestureDetector gesture={composed}>
-      <View style={[styles.container, { aspectRatio }]} onLayout={onLayout}>
+      <View style={[styles.container, { aspectRatio: safeAspect }]} onLayout={onLayout}>
         <Image source={{ uri: beforeUri }} style={styles.image} resizeMode="contain" />
         {ready ? (
           <Animated.View style={[styles.afterWrap, afterClipStyle]}>

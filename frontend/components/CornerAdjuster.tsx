@@ -1,8 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Image, LayoutChangeEvent, StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-  useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -11,8 +10,7 @@ import Svg, { Polygon } from "react-native-svg";
 
 import type { Point } from "@/hooks/useScanner";
 
-const AnimatedPolygon = Animated.createAnimatedComponent(Polygon);
-const HANDLE = 24;
+const HANDLE = 28;
 
 interface CornerAdjusterProps {
   imageUri: string;
@@ -24,8 +22,12 @@ interface CornerAdjusterProps {
 
 /**
  * Photo with 4 draggable corner handles connected by a polygon outline.
- * Coordinates are stored in SOURCE image pixel space; we convert to/from the
- * on-screen display rect for layout + gestures.
+ *
+ * The container's aspect-ratio matches the source image so that a single
+ * mapping (source pixels → container pixels) is enough — no letterboxing
+ * to compensate for. This was the bug being fixed: previously the container
+ * was hard-coded to 3:4, so a landscape source image was letterboxed inside
+ * with corners drifting onto the empty bands.
  */
 export function CornerAdjuster({
   imageUri, imageWidth, imageHeight, corners, onCornersChange,
@@ -35,6 +37,11 @@ export function CornerAdjuster({
   const onLayout = (e: LayoutChangeEvent) => {
     setLayout({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height });
   };
+
+  const aspectRatio = useMemo(
+    () => (imageWidth > 0 && imageHeight > 0 ? imageWidth / imageHeight : 3 / 4),
+    [imageWidth, imageHeight],
+  );
 
   const toScreenX = useCallback(
     (srcX: number) => (layout.width ? (srcX / imageWidth) * layout.width : 0),
@@ -59,8 +66,12 @@ export function CornerAdjuster({
       : "";
 
   return (
-    <View style={styles.container} onLayout={onLayout}>
-      <Image source={{ uri: imageUri }} style={styles.image} resizeMode="contain" />
+    <View style={[styles.container, { aspectRatio }]} onLayout={onLayout}>
+      <Image
+        source={{ uri: imageUri }}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      />
       {layout.width > 0 && corners.length === 4 && (
         <>
           <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -69,10 +80,12 @@ export function CornerAdjuster({
           {corners.map((c, i) => (
             <DraggableHandle
               key={i}
-              initialX={toScreenX(c.x)}
-              initialY={toScreenY(c.y)}
+              srcX={c.x}
+              srcY={c.y}
               maxX={layout.width}
               maxY={layout.height}
+              toScreenX={toScreenX}
+              toScreenY={toScreenY}
               onCommit={(sx, sy) => {
                 const next = [...corners];
                 next[i] = { x: toSrcX(sx), y: toSrcY(sy) };
@@ -87,25 +100,35 @@ export function CornerAdjuster({
 }
 
 interface HandleProps {
-  initialX: number;
-  initialY: number;
+  srcX: number;
+  srcY: number;
   maxX: number;
   maxY: number;
+  toScreenX: (n: number) => number;
+  toScreenY: (n: number) => number;
   onCommit: (x: number, y: number) => void;
 }
 
-function DraggableHandle({ initialX, initialY, maxX, maxY, onCommit }: HandleProps) {
+function DraggableHandle({ srcX, srcY, maxX, maxY, toScreenX, toScreenY, onCommit }: HandleProps) {
+  // We keep the position in screen pixels for the gesture but RE-SEED it
+  // from props on every render via useMemo so that whenever the parent's
+  // corners array changes (e.g. after detect-edges or on resize) the
+  // handles snap to the new positions instead of drifting.
+  const initialX = toScreenX(srcX);
+  const initialY = toScreenY(srcY);
+
   const x = useSharedValue(initialX);
   const y = useSharedValue(initialY);
   const scale = useSharedValue(1);
   const startX = useSharedValue(0);
   const startY = useSharedValue(0);
 
-  // Sync if controlled corner changes externally
-  if (Math.abs(x.value - initialX) > 1 && scale.value === 1) {
+  // Re-seed if parent state moved this corner (e.g. layout change, detect run).
+  // We only re-seed when not actively dragging (scale === 1).
+  if (scale.value === 1 && Math.abs(x.value - initialX) > 0.5) {
     x.value = initialX;
   }
-  if (Math.abs(y.value - initialY) > 1 && scale.value === 1) {
+  if (scale.value === 1 && Math.abs(y.value - initialY) > 0.5) {
     y.value = initialY;
   }
 
@@ -146,13 +169,11 @@ function DraggableHandle({ initialX, initialY, maxX, maxY, onCommit }: HandlePro
 const styles = StyleSheet.create({
   container: {
     width: "100%",
-    aspectRatio: 3 / 4,
     backgroundColor: "#111",
     borderRadius: 12,
     overflow: "hidden",
     position: "relative",
   },
-  image: { width: "100%", height: "100%" },
   handleOuter: {
     position: "absolute",
     top: 0,

@@ -61,6 +61,28 @@ async def _get_user_task(db: AsyncSession, task_id: uuid.UUID, user_id: uuid.UUI
     return task
 
 
+@router.get("/storage-usage")
+async def storage_usage(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    """Total bytes the current user has stored across all of their processed
+    files, plus a count of those files. Cheap aggregate — runs in one query.
+    """
+    row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(ProcessedFile.size_bytes), 0),
+                func.count(ProcessedFile.id),
+            )
+            .join(Task, Task.id == ProcessedFile.task_id)
+            .where(Task.user_id == user.id)
+        )
+    ).one()
+    total_bytes, file_count = int(row[0] or 0), int(row[1] or 0)
+    return {"total_bytes": total_bytes, "file_count": file_count}
+
+
 @router.get("/history", response_model=TaskHistoryOut)
 async def task_history(
     page: int = Query(1, ge=1),
@@ -99,6 +121,42 @@ async def task_status(
 ) -> TaskStatusOut:
     task = await _get_user_task(db, task_id, user.id)
     return TaskStatusOut.model_validate(task)
+
+
+@router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_task(
+    task_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a task and its associated stored file.
+
+    Best-effort: if the storage delete fails (network blip, ImageKit
+    transient), we still remove the local rows so the user's history is
+    consistent with what they see in the UI. The orphaned ImageKit file
+    will be picked up by the daily cleanup job.
+    """
+    task = (
+        await db.execute(
+            select(Task)
+            .options(selectinload(Task.processed_file))
+            .where(Task.id == task_id, Task.user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    pf = task.processed_file
+    if pf and pf.imagekit_file_id:
+        try:
+            from app.services.storage_service import delete_file
+            delete_file(pf.imagekit_file_id)
+        except Exception as exc:
+            logger.warning("Storage delete failed during task delete: %s", exc)
+
+    await db.delete(task)
+    await db.commit()
+    return None
 
 
 @router.get("/{task_id}/result", response_model=TaskResultOut)

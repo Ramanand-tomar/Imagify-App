@@ -121,17 +121,38 @@ export default function EnhanceScreen() {
     [params, tab],
   );
 
+  // Pull stable callback references out of `session` so the preview-trigger
+  // effect below depends on primitives + memoised callbacks instead of the
+  // whole `session` object (which is a NEW literal on every render and would
+  // cause the effect to fire — and request a preview — on every render).
+  const { sessionId, requestPreview, clearPreview, clearError } = session;
+
+  // When the user switches tabs, drop the previous tab's "after" image so
+  // the slider doesn't show CLAHE's preview while the Contrast tab is open.
+  // The new debounced preview will repaint it once it arrives.
+  const previousTabRef = useRef<TabKey>(tab);
   useEffect(() => {
-    if (session.sessionId && tab !== "ai" && currentParams) {
-      session.requestPreview(tab as EnhanceOp, currentParams);
+    if (previousTabRef.current !== tab) {
+      previousTabRef.current = tab;
+      clearPreview();
     }
-  }, [session.sessionId, tab, currentParams, session]);
+  }, [tab, clearPreview]);
+
+  // Trigger a debounced preview request whenever sessionId, tab or params
+  // change. AI tab is server-side only — no inline preview.
+  useEffect(() => {
+    if (sessionId && tab !== "ai" && currentParams) {
+      requestPreview(tab as EnhanceOp, currentParams);
+    }
+  }, [sessionId, tab, currentParams, requestPreview]);
 
   const updateParam = useCallback(
     <K extends keyof Params>(which: K, patch: Partial<Params[K]>) => {
       setParams((prev) => ({ ...prev, [which]: { ...prev[which], ...patch } }));
+      // Stale "preview failed" banner shouldn't survive a fresh attempt.
+      clearError();
     },
-    [],
+    [clearError],
   );
 
   const onApply = async () => {
@@ -227,7 +248,11 @@ export default function EnhanceScreen() {
               <BeforeAfterSlider
                 beforeUri={session.originalUri}
                 afterUri={session.previewUri ?? session.originalUri}
-                aspectRatio={session.width / Math.max(1, session.height)}
+                aspectRatio={
+                  session.width > 0 && session.height > 0
+                    ? session.width / session.height
+                    : 4 / 3
+                }
               />
               <View style={styles.statusRow}>
                 {session.previewing ? <ActivityIndicator size="small" color={theme.colors.brand.default} /> : null}

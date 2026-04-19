@@ -44,6 +44,15 @@ interface UseImageSessionState {
   upload: (file: PickedFile) => Promise<void>;
   requestPreview: (op: EnhanceOp, params: Record<string, unknown>) => void;
   apply: (op: EnhanceOp, params: Record<string, unknown>) => Promise<void>;
+  /**
+   * Drop the in-flight preview, reset the "after" image back to the
+   * original, and clear any preview-related error. Called by the screen
+   * when the user switches operation tabs so the slider doesn't keep
+   * showing the previous operation's result.
+   */
+  clearPreview: () => void;
+  /** Clear just the error banner (used when user changes a parameter). */
+  clearError: () => void;
   /** Used by async (AI) flows to inject a completed result back into the session UI. */
   applyExternalResult: (r: {
     download_url: string;
@@ -140,6 +149,8 @@ export function useImageSession(): UseImageSessionState {
           if (!mountedRef.current) return;
           if (token === latestPreviewRef.current && data?.preview_base64) {
             setPreviewUri(`data:${data.mime_type};base64,${data.preview_base64}`);
+            // Clear any prior error now that a fresh preview succeeded.
+            setError(null);
           }
         } catch (err: unknown) {
           if (!mountedRef.current) return;
@@ -186,6 +197,26 @@ export function useImageSession(): UseImageSessionState {
     [sessionId],
   );
 
+  const clearPreview = useCallback<UseImageSessionState["clearPreview"]>(() => {
+    // Cancel any in-flight preview request and bump the token so a
+    // late-arriving response doesn't overwrite the cleared state.
+    previewAbortRef.current?.abort();
+    previewAbortRef.current = null;
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    latestPreviewRef.current += 1;
+    if (!mountedRef.current) return;
+    setPreviewUri(originalUri);
+    setPreviewing(false);
+    setError(null);
+  }, [originalUri]);
+
+  const clearError = useCallback<UseImageSessionState["clearError"]>(() => {
+    if (mountedRef.current) setError(null);
+  }, []);
+
   const applyExternalResult = useCallback<UseImageSessionState["applyExternalResult"]>((r) => {
     if (!mountedRef.current) return;
     setResult({
@@ -229,6 +260,8 @@ export function useImageSession(): UseImageSessionState {
     upload,
     requestPreview,
     apply,
+    clearPreview,
+    clearError,
     applyExternalResult,
     reset,
   };
