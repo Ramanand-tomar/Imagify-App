@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import binascii
 import logging
 from typing import TYPE_CHECKING
 
+import httpx
 from imagekitio import ImageKit
 from imagekitio.models.UploadFileRequestOptions import UploadFileRequestOptions
 
@@ -12,6 +14,16 @@ if TYPE_CHECKING:
     from imagekitio.models.UploadFileResponse import UploadFileResponse
 
 logger = logging.getLogger("imagify.storage")
+
+# Magic bytes for the file types we ship. Used by post-upload verification to
+# detect any byte-level corruption between our process and ImageKit storage.
+_MAGIC: dict[str, list[bytes]] = {
+    "application/pdf": [b"%PDF-"],
+    "image/png": [b"\x89PNG\r\n\x1a\n"],
+    "image/jpeg": [b"\xff\xd8\xff"],
+    "image/webp": [b"RIFF"],  # RIFF...WEBP
+    "application/zip": [b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"],
+}
 
 
 class StorageError(RuntimeError):
@@ -27,24 +39,134 @@ def get_imagekit() -> ImageKit:
     )
 
 
+def _hex_preview(data: bytes, n: int = 16) -> str:
+    """Hex-dump first ``n`` bytes for logs (e.g. ``25 50 44 46 2d 31 2e 34``)."""
+    head = data[:n]
+    return binascii.hexlify(head, sep=" ").decode("ascii") if head else "<empty>"
+
+
+def _expected_magics(mime_type: str | None, filename: str) -> list[bytes]:
+    """Return the list of known good magic-byte prefixes for a file. Empty
+    list means "we don't know how to verify this type"."""
+    mt = (mime_type or "").lower()
+    if mt in _MAGIC:
+        return _MAGIC[mt]
+    # Fall back to extension sniffing for callers that don't pass MIME type.
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    if ext == "pdf":
+        return _MAGIC["application/pdf"]
+    if ext == "png":
+        return _MAGIC["image/png"]
+    if ext in ("jpg", "jpeg"):
+        return _MAGIC["image/jpeg"]
+    if ext == "webp":
+        return _MAGIC["image/webp"]
+    if ext == "zip":
+        return _MAGIC["application/zip"]
+    return []
+
+
+def _verify_uploaded_bytes(
+    file_path: str,
+    expected_bytes: bytes,
+    *,
+    mime_type: str | None,
+    filename: str,
+) -> None:
+    """Round-trip-fetch the file we just uploaded and compare magic bytes
+    against the original. Logs a loud warning if ImageKit served back
+    something that doesn't match what we sent — this catches SDK encoding
+    bugs and account-side processing surprises that would otherwise show
+    up as "Can't open PDF file" on the client.
+
+    Best-effort: never raises. Skipped if we can't sign the URL or fetch.
+    """
+    try:
+        signed = get_signed_url(file_path, expire_seconds=120)
+    except StorageError as exc:
+        logger.warning("Verify skipped — could not sign %s: %s", file_path, exc)
+        return
+
+    try:
+        # Identity encoding so we compare raw bytes, never a decoded view.
+        with httpx.Client(timeout=30.0, follow_redirects=True) as c:
+            resp = c.get(signed, headers={"Accept-Encoding": "identity"})
+    except httpx.HTTPError as exc:
+        logger.warning("Verify skipped — fetch failed for %s: %s", file_path, exc)
+        return
+
+    if resp.status_code != 200:
+        logger.warning(
+            "Verify skipped — ImageKit returned %s for verification fetch of %s",
+            resp.status_code, file_path,
+        )
+        return
+
+    served = resp.content
+    served_size = len(served)
+    expected_size = len(expected_bytes)
+    served_head = _hex_preview(served)
+    expected_head = _hex_preview(expected_bytes)
+
+    magics = _expected_magics(mime_type, filename)
+    matches_magic = any(served.startswith(m) for m in magics) if magics else None
+    same_size = served_size == expected_size
+
+    if same_size and (matches_magic is None or matches_magic):
+        logger.info(
+            "Verify OK file_path=%s size=%d head=%s",
+            file_path, served_size, served_head,
+        )
+        return
+
+    # Something is off — log loudly so it shows up in Render dashboard.
+    logger.error(
+        "Verify FAIL file_path=%s mime=%s\n"
+        "  expected size=%d head=%s\n"
+        "  served   size=%d head=%s\n"
+        "  matches_magic=%s\n"
+        "  This means ImageKit storage holds different bytes than we uploaded. "
+        "Likely causes: imagekitio SDK base64-encoding bug, account "
+        "processing on non-image files, or wrong file_path returned.",
+        file_path, mime_type,
+        expected_size, expected_head,
+        served_size, served_head,
+        matches_magic,
+    )
+
+
 def upload_file(
     file_bytes: bytes,
     filename: str,
     task_id: str | None = None,
     folder: str = "processed",
+    *,
+    mime_type: str | None = None,
+    verify: bool = True,
 ) -> tuple[str, str, str]:
-    """
-    Uploads a file to ImageKit.
-    Returns: (file_id, file_path, url)
+    """Uploads a file to ImageKit.
 
-    Raises:
-        StorageError: if the upload fails or returns an unusable response.
+    Returns ``(file_id, file_path, url)``.
+
+    When ``verify`` is True, immediately fetches the file back via a signed
+    URL and logs a loud warning if magic bytes / size don't match the
+    upload — this is the single most useful diagnostic for "file uploads
+    fine but downloads as garbage" bugs.
+
+    Raises ``StorageError`` if the upload itself fails or returns an unusable
+    response. Verification failures are *logged but not raised* so that a
+    flaky verification step never breaks an otherwise-working upload.
     """
     client = get_imagekit()
 
     target_folder = f"/imagify/{folder}"
     if task_id:
         target_folder = f"{target_folder}/{task_id}"
+
+    logger.info(
+        "Upload start: filename=%s size=%d mime=%s head=%s folder=%s",
+        filename, len(file_bytes), mime_type, _hex_preview(file_bytes), target_folder,
+    )
 
     try:
         response: UploadFileResponse = client.upload_file(
@@ -80,6 +202,9 @@ def upload_file(
         # always re-sign on download anyway, so this is just a warning.
         logger.warning("ImageKit upload missing url field for file_path=%s; will sign on demand", file_path)
         url = ""
+
+    if verify:
+        _verify_uploaded_bytes(file_path, file_bytes, mime_type=mime_type, filename=filename)
 
     return file_id, file_path, url
 

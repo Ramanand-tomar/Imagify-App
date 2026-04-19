@@ -191,7 +191,7 @@ async def record_sync_result(
 
     try:
         file_id, file_path, url = storage_service.upload_file(
-            result_bytes, filename, task_id=str(task.id)
+            result_bytes, filename, task_id=str(task.id), mime_type=mime_type,
         )
     except StorageError as exc:
         # Mark the task as failed so the client sees the right state on retry
@@ -258,7 +258,7 @@ def finalize_task_sync(
     """
     try:
         file_id, file_path, url = storage_service.upload_file(
-            result_bytes, filename, task_id=str(task.id)
+            result_bytes, filename, task_id=str(task.id), mime_type=mime_type,
         )
     except StorageError as exc:
         logger.error("Worker storage upload failed for task %s: %s", task.id, exc)
