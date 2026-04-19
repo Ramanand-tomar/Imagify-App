@@ -27,12 +27,29 @@ SIGNED_URL_TTL_SECONDS = 3600
 
 
 def download_url_for(task_id: uuid.UUID) -> str:
-    """Return a relative path the frontend prefixes with its API base.
+    """Backend proxy URL — used as a fallback when signing fails.
 
-    The download endpoint streams the ImageKit result through the backend so
-    the client never depends on ImageKit URL signing/redirect behavior.
+    The proxy is a last resort because PaaS edge layers (Render, Cloudflare,
+    etc.) can interfere with streamed binary bodies (gzip handling, buffering,
+    Content-Length games). Prefer ``result_download_url`` which returns a
+    direct signed ImageKit URL.
     """
     return f"/tasks/{task_id}/download"
+
+
+def result_download_url(pf: ProcessedFile, task_id: uuid.UUID) -> str:
+    """Build the URL the client should hit to download a processed file.
+
+    Returns a fresh signed ImageKit URL when possible (client downloads
+    directly from the CDN — fast, byte-perfect, supports range requests).
+    Falls back to the backend proxy only if signing fails.
+    """
+    if pf.imagekit_file_path:
+        try:
+            return get_signed_url(pf.imagekit_file_path, expire_seconds=SIGNED_URL_TTL_SECONDS)
+        except StorageError as exc:
+            logger.warning("Sign URL failed for task %s, using proxy: %s", task_id, exc)
+    return download_url_for(task_id)
 
 
 async def _get_user_task(db: AsyncSession, task_id: uuid.UUID, user_id: uuid.UUID) -> Task:
@@ -90,6 +107,13 @@ async def task_result(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TaskResultOut:
+    """Return a fresh signed ImageKit URL the client can hit directly.
+
+    Hitting ImageKit's CDN directly avoids any chance of our proxy mangling
+    binary file bytes (gzip/Content-Length issues, edge-proxy buffering on
+    PaaS layers, etc). If signing fails for any reason we fall back to the
+    backend proxy at /tasks/{id}/download.
+    """
     task = (
         await db.execute(
             select(Task)
@@ -110,7 +134,7 @@ async def task_result(
 
     return TaskResultOut(
         task_id=task.id,
-        download_url=download_url_for(task.id),
+        download_url=result_download_url(pf, task.id),
         expires_in_seconds=SIGNED_URL_TTL_SECONDS,
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
@@ -146,7 +170,7 @@ async def batch_status(
             pf = t.processed_file
             results.append(TaskResultOut(
                 task_id=t.id,
-                download_url=download_url_for(t.id),
+                download_url=result_download_url(pf, t.id),
                 expires_in_seconds=SIGNED_URL_TTL_SECONDS,
                 original_filename=pf.original_filename,
                 mime_type=pf.mime_type,

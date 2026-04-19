@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
-from app.api.tasks import download_url_for
+from app.api.tasks import result_download_url
 from app.dependencies import get_current_user, get_db
 from app.models.task import Task, TaskType
 from app.models.user import User
@@ -212,7 +212,7 @@ async def apply_enhancement(
     h, w = result_img.shape[:2]
     return ImageResultOut(
         task_id=task.id,
-        download_url=download_url_for(task.id),
+        download_url=result_download_url(pf, task.id),
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,
@@ -245,7 +245,7 @@ async def convert(
     )
     return ImageResultOut(
         task_id=task.id,
-        download_url=download_url_for(task.id),
+        download_url=result_download_url(pf, task.id),
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,
@@ -273,7 +273,7 @@ async def compress(
     )
     return ImageResultOut(
         task_id=task.id,
-        download_url=download_url_for(task.id),
+        download_url=result_download_url(pf, task.id),
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,
@@ -425,7 +425,7 @@ async def deblur_from_session(
         )
         return ImageResultOut(
             task_id=task.id,
-            download_url=download_url_for(task.id),
+            download_url=result_download_url(pf, task.id),
             original_filename=pf.original_filename,
             mime_type=pf.mime_type,
             size_bytes=pf.size_bytes,
@@ -462,7 +462,7 @@ async def homomorphic_from_session(
     )
     return ImageResultOut(
         task_id=task.id,
-        download_url=download_url_for(task.id),
+        download_url=result_download_url(pf, task.id),
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,
@@ -493,7 +493,7 @@ async def resize(
     )
     return ImageResultOut(
         task_id=task.id,
-        download_url=download_url_for(task.id),
+        download_url=result_download_url(pf, task.id),
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,

@@ -4,7 +4,7 @@ import zipfile
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.tasks import download_url_for
+from app.api.tasks import result_download_url
 from app.dependencies import get_current_user, get_db
 from app.models.task import TaskType
 from app.models.user import User
@@ -27,7 +27,7 @@ IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
 def _to_result(task, pf) -> SyncResultOut:
     return SyncResultOut(
         task_id=task.id,
-        download_url=download_url_for(task.id),
+        download_url=result_download_url(pf, task.id),
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,
