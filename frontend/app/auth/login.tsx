@@ -9,6 +9,7 @@ import { AppLogo, Button, GradientSurface, Input, Text } from "@/components/ui";
 import { pingServer } from "@/services/api";
 import { useAuthStore } from "@/stores/authStore";
 import { useAppTheme } from "@/theme/useTheme";
+import { extractErrorMessage } from "@/utils/errors";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -29,12 +30,21 @@ export default function LoginScreen() {
     const timer = setTimeout(() => {
       if (active) setWakingUp(true);
     }, 3000);
-    pingServer().then(() => {
-      clearTimeout(timer);
+    // Hard cap so the "waking up" banner never hangs forever
+    const hardCap = setTimeout(() => {
       if (active) setWakingUp(false);
-    });
+    }, 15000);
+    pingServer()
+      .catch(() => false)
+      .finally(() => {
+        clearTimeout(timer);
+        clearTimeout(hardCap);
+        if (active) setWakingUp(false);
+      });
     return () => {
       active = false;
+      clearTimeout(timer);
+      clearTimeout(hardCap);
     };
   }, []);
 
@@ -49,8 +59,8 @@ export default function LoginScreen() {
     setSubmitting(true);
     try {
       await login(email.trim().toLowerCase(), password);
-    } catch (err: any) {
-      setServerError(err?.response?.data?.detail ?? "Login failed. Check your credentials.");
+    } catch (err: unknown) {
+      setServerError(extractErrorMessage(err, "Login failed. Check your credentials."));
     } finally {
       setSubmitting(false);
     }
@@ -64,14 +74,14 @@ export default function LoginScreen() {
           <GradientSurface radius="3xl" contentStyle={styles.hero}>
             <View style={styles.brandRow}>
               <AppLogo size={40} variant="gradient" />
-              <Text variant="titleLg" style={{ color: "#FFFFFF" }}>
+              <Text variant="titleLg" style={{ color: theme.onGradient.primary }}>
                 Imagify AI
               </Text>
             </View>
-            <Text variant="h1" style={{ color: "#FFFFFF", marginTop: 20 }}>
+            <Text variant="h1" style={{ color: theme.onGradient.primary, marginTop: 20 }}>
               Welcome back
             </Text>
-            <Text variant="body" style={{ color: "rgba(255,255,255,0.85)", marginTop: 4 }}>
+            <Text variant="body" style={{ color: theme.onGradient.secondary, marginTop: 4 }}>
               Sign in to keep processing your files
             </Text>
           </GradientSurface>
@@ -138,14 +148,6 @@ const styles = StyleSheet.create({
   scroll: { padding: 20, gap: 20, flexGrow: 1, justifyContent: "center" },
   hero: { padding: 24, minHeight: 180 },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  brandMark: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   form: { gap: 12 },
   errorBanner: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12 },
   footer: { flexDirection: "row", justifyContent: "center", marginTop: 16 },

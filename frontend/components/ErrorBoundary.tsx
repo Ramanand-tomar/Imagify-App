@@ -2,9 +2,14 @@ import React from "react";
 import { StyleSheet, View } from "react-native";
 
 import { Button, EmptyState, Text } from "@/components/ui";
+import { colors } from "@/theme/tokens";
+import { createLogger } from "@/utils/logger";
+
+const log = createLogger("ErrorBoundary");
 
 interface Props {
   children: React.ReactNode;
+  onReset?: () => void;
 }
 
 interface State {
@@ -19,14 +24,20 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // eslint-disable-next-line no-console
-    console.error("ErrorBoundary caught:", error, info);
+    log.error("Caught runtime error", error, info.componentStack);
   }
 
-  reset = () => this.setState({ error: null });
+  reset = () => {
+    this.setState({ error: null });
+    this.props.onReset?.();
+  };
 
   render() {
     if (!this.state.error) return this.props.children;
+
+    const message = this.state.error.message || "Unknown error";
+    const truncated = message.length > 240 ? `${message.slice(0, 240)}…` : message;
+
     return (
       <View style={styles.container}>
         <EmptyState
@@ -35,8 +46,8 @@ export class ErrorBoundary extends React.Component<Props, State> {
           description="An unexpected error occurred. You can try again — your data is safe."
         />
         <View style={{ paddingHorizontal: 32 }}>
-          <Text variant="caption" tone="muted" align="center" numberOfLines={3}>
-            {this.state.error.message}
+          <Text variant="caption" tone="muted" align="center" numberOfLines={3} ellipsizeMode="tail">
+            {truncated}
           </Text>
           <Button
             label="Try again"
@@ -52,5 +63,12 @@ export class ErrorBoundary extends React.Component<Props, State> {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: "stretch", justifyContent: "center", padding: 24, gap: 12, backgroundColor: "#F7F8FC" },
+  container: {
+    flex: 1,
+    alignItems: "stretch",
+    justifyContent: "center",
+    padding: 24,
+    gap: 12,
+    backgroundColor: colors.light.surface.background,
+  },
 });

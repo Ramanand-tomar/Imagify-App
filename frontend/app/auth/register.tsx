@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { AppLogo, Button, GradientSurface, Input, ProgressBar, Text } from "@/components/ui";
 import { useAuthStore } from "@/stores/authStore";
 import { useAppTheme } from "@/theme/useTheme";
+import { extractErrorMessage } from "@/utils/errors";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -58,8 +59,8 @@ export default function RegisterScreen() {
     setSubmitting(true);
     try {
       await register(email.trim().toLowerCase(), password);
-    } catch (err: any) {
-      setServerError(err?.response?.data?.detail ?? "Registration failed.");
+    } catch (err: unknown) {
+      setServerError(extractErrorMessage(err, "Registration failed."));
     } finally {
       setSubmitting(false);
     }
@@ -75,14 +76,14 @@ export default function RegisterScreen() {
           <GradientSurface radius="3xl" contentStyle={styles.hero}>
             <View style={styles.brandRow}>
               <AppLogo size={40} variant="gradient" />
-              <Text variant="titleLg" style={{ color: "#FFFFFF" }}>
+              <Text variant="titleLg" style={{ color: theme.onGradient.primary }}>
                 Imagify AI
               </Text>
             </View>
-            <Text variant="h1" style={{ color: "#FFFFFF", marginTop: 20 }}>
+            <Text variant="h1" style={{ color: theme.onGradient.primary, marginTop: 20 }}>
               Create account
             </Text>
-            <Text variant="body" style={{ color: "rgba(255,255,255,0.85)", marginTop: 4 }}>
+            <Text variant="body" style={{ color: theme.onGradient.secondary, marginTop: 4 }}>
               Start processing files with AI tools
             </Text>
           </GradientSurface>
@@ -161,14 +162,6 @@ const styles = StyleSheet.create({
   scroll: { padding: 20, gap: 20, flexGrow: 1, justifyContent: "center" },
   hero: { padding: 24, minHeight: 180 },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  brandMark: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   form: { gap: 12 },
   strengthRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: -4 },
   errorBanner: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12 },

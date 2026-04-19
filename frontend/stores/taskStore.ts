@@ -1,5 +1,9 @@
 import { create } from "zustand";
+
 import { api } from "@/services/api";
+import { createLogger } from "@/utils/logger";
+
+const log = createLogger("taskStore");
 
 export type TaskStatus = "pending" | "in_progress" | "success" | "failed";
 export type TaskType = "pdf" | "image" | "ai" | "ocr";
@@ -54,55 +58,100 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   updateTask: (id, patch) =>
     set((state) => {
       const existing = state.active[id];
-      if (!existing) return { active: { ...state.active, [id]: { ...patch } as any } }; // fallback for batch tasks not explicitly added
+      if (!existing) {
+        // Batch tasks may arrive before being explicitly added; seed defaults
+        const seeded: Task = {
+          id,
+          task_type: "pdf",
+          status: "pending",
+          progress: 0,
+          created_at: new Date().toISOString(),
+          ...patch,
+        };
+        return { active: { ...state.active, [id]: seeded } };
+      }
       return { active: { ...state.active, [id]: { ...existing, ...patch } } };
     }),
 
   pollTask: (id, intervalMs = 1500) => {
+    if (!id) {
+      log.warn("pollTask called without task id");
+      return () => {};
+    }
     let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    let consecutiveFailures = 0;
+    const MAX_FAILURES = 8;
+
     const tick = async () => {
       if (cancelled) return;
       try {
         const { data } = await api.get<Task>(`/tasks/${id}/status`);
+        consecutiveFailures = 0;
         get().updateTask(id, data);
         if (data.status === "success" || data.status === "failed") return;
-      } catch {
-        // keep retrying
+      } catch (err) {
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= MAX_FAILURES) {
+          log.warn(`Polling task ${id} failed ${MAX_FAILURES} times, giving up`, err);
+          get().updateTask(id, { status: "failed", error_message: "Lost connection to server" });
+          return;
+        }
       }
-      if (!cancelled) setTimeout(tick, intervalMs);
+      if (!cancelled) {
+        // Exponential-ish backoff on failure; steady cadence on success
+        const delay = consecutiveFailures > 0 ? Math.min(intervalMs * 2 ** consecutiveFailures, 15000) : intervalMs;
+        timeout = setTimeout(tick, delay);
+      }
     };
     tick();
     return () => {
       cancelled = true;
+      if (timeout) clearTimeout(timeout);
     };
   },
 
   pollBatch: (batchId, onUpdate, intervalMs = 2000) => {
+    if (!batchId) {
+      log.warn("pollBatch called without batch id");
+      return () => {};
+    }
     let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    let consecutiveFailures = 0;
+    const MAX_FAILURES = 8;
+
     const tick = async () => {
       if (cancelled) return;
       try {
         const { data } = await api.get<BatchStatus>(`/tasks/batch/${batchId}/status`);
+        consecutiveFailures = 0;
         onUpdate(data);
-        
-        // Update individual tasks in active state for history/consistency
-        data.tasks.forEach(task => get().updateTask(task.id, task));
-        
+        data.tasks.forEach((task) => get().updateTask(task.id, task));
         if (data.completed + data.failed === data.total) return;
       } catch (err) {
-        console.error("Batch poll failed:", err);
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= MAX_FAILURES) {
+          log.warn(`Batch poll ${batchId} giving up after ${MAX_FAILURES} failures`, err);
+          return;
+        }
       }
-      if (!cancelled) setTimeout(tick, intervalMs);
+      if (!cancelled) {
+        const delay = consecutiveFailures > 0 ? Math.min(intervalMs * 2 ** consecutiveFailures, 20000) : intervalMs;
+        timeout = setTimeout(tick, delay);
+      }
     };
     tick();
     return () => {
       cancelled = true;
+      if (timeout) clearTimeout(timeout);
     };
   },
 
   loadHistory: async (page = 1) => {
     const { data } = await api.get<{ items: Task[] }>(`/tasks/history`, { params: { page } });
-    set({ history: data.items, historyLoaded: true });
+    const items = Array.isArray(data?.items) ? data.items : [];
+    set({ history: items, historyLoaded: true });
   },
 
   reset: () => set({ active: {}, history: [], historyLoaded: false }),

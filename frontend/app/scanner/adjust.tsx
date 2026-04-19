@@ -27,13 +27,15 @@ export default function ScannerAdjustScreen() {
     if (pendingFile && !scanner.sessionId && !scanner.uploading) {
       scanner.upload(pendingFile);
     }
-  }, [pendingFile, scanner]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingFile, scanner.sessionId, scanner.uploading]);
 
   useEffect(() => {
     if (scanner.sessionId && scanner.corners.length === 0 && !scanner.detecting) {
       scanner.detectEdges();
     }
-  }, [scanner.sessionId, scanner.corners.length, scanner.detecting, scanner]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanner.sessionId, scanner.corners.length, scanner.detecting]);
 
   useEffect(() => {
     if (scanner.result) {

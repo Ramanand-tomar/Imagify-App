@@ -1,6 +1,7 @@
 import Slider from "@react-native-community/slider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Icon } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { BeforeAfterSlider } from "@/components/BeforeAfterSlider";
@@ -20,6 +21,7 @@ import { useImageSession, type EnhanceOp } from "@/hooks/useImageSession";
 import { api } from "@/services/api";
 import { useTaskStore, type Task } from "@/stores/taskStore";
 import { useAppTheme } from "@/theme/useTheme";
+import { extractErrorMessage } from "@/utils/errors";
 
 type TabKey = EnhanceOp | "ai";
 type AiMode = "super-res" | "lowlight" | "denoise-ai";
@@ -76,6 +78,8 @@ export default function EnhanceScreen() {
   useEffect(() => {
     if (!aiTaskId) return;
     if (!activeAiTask) return;
+    let cancelled = false;
+
     if (activeAiTask.status === "success") {
       aiCancelPoll.current?.();
       aiCancelPoll.current = null;
@@ -84,8 +88,12 @@ export default function EnhanceScreen() {
           `/tasks/${aiTaskId}/result`,
         )
         .then(
-          (r) => session.applyExternalResult(r.data),
-          (err) => setAiError(err?.response?.data?.detail ?? "Failed to fetch result"),
+          (r) => {
+            if (!cancelled && r.data?.download_url) session.applyExternalResult(r.data);
+          },
+          (err) => {
+            if (!cancelled) setAiError(extractErrorMessage(err, "Failed to fetch result"));
+          },
         );
       setAiTaskId(null);
     } else if (activeAiTask.status === "failed") {
@@ -94,9 +102,19 @@ export default function EnhanceScreen() {
       setAiError(activeAiTask.error_message ?? "AI task failed");
       setAiTaskId(null);
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, [aiTaskId, activeAiTask, session]);
 
-  useEffect(() => () => aiCancelPoll.current?.(), []);
+  useEffect(
+    () => () => {
+      aiCancelPoll.current?.();
+      aiCancelPoll.current = null;
+    },
+    [],
+  );
 
   const currentParams = useMemo(
     () => (tab === "ai" ? null : (params[tab as keyof Params] as Record<string, unknown>)),
@@ -119,21 +137,37 @@ export default function EnhanceScreen() {
   const onApply = async () => {
     if (tab === "ai" || !currentParams) return;
     if (tab === "deblur") {
+      if (!session.sessionId) return;
       setAiError(null);
       try {
-        const { data } = await api.post<{ task_id?: string; download_url?: string }>("/image/enhance/deblur/session", {
+        const { data } = await api.post<{
+          task_id?: string;
+          download_url?: string;
+          original_filename?: string;
+          mime_type?: string;
+          size_bytes?: number;
+        }>("/image/enhance/deblur/session", {
           session_id: session.sessionId,
           operation: "deblur",
           params: currentParams,
         });
-        if (data.task_id) {
+        if (data?.task_id) {
           setAiTaskId(data.task_id);
           aiCancelPoll.current = useTaskStore.getState().pollTask(data.task_id, 1500);
-        } else if (data.download_url) {
-          session.applyExternalResult(data as any);
+          return;
         }
+        if (data?.download_url && data.original_filename && data.mime_type && typeof data.size_bytes === "number") {
+          session.applyExternalResult({
+            download_url: data.download_url,
+            original_filename: data.original_filename,
+            mime_type: data.mime_type,
+            size_bytes: data.size_bytes,
+          });
+          return;
+        }
+        setAiError("Deblur returned an unexpected response");
       } catch (err: unknown) {
-        setAiError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Deblur failed");
+        setAiError(extractErrorMessage(err, "Deblur failed"));
       }
       return;
     }
@@ -159,12 +193,11 @@ export default function EnhanceScreen() {
         operation: aiMode,
         params: aiParams,
       });
+      if (!data?.task_id) throw new Error("Server did not return a task id");
       setAiTaskId(data.task_id);
       aiCancelPoll.current = useTaskStore.getState().pollTask(data.task_id, 1500);
     } catch (err: unknown) {
-      setAiError(
-        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Failed to start AI task",
-      );
+      setAiError(extractErrorMessage(err, "Failed to start AI task"));
     } finally {
       setAiSubmitting(false);
     }
@@ -220,18 +253,18 @@ export default function EnhanceScreen() {
                       },
                     ]}
                   >
-                    <Icon source={o.icon} size={14} color={active ? "#FFFFFF" : theme.colors.text.secondary} />
-                    <Text variant="titleSm" style={{ color: active ? "#FFFFFF" : theme.colors.text.primary }}>
+                    <Icon source={o.icon} size={14} color={active ? theme.colors.brand.contrast : theme.colors.text.secondary} />
+                    <Text variant="titleSm" style={{ color: active ? theme.colors.brand.contrast : theme.colors.text.primary }}>
                       {o.label}
                     </Text>
                     {o.pro ? (
                       <View
                         style={[
                           styles.proDot,
-                          { backgroundColor: active ? "rgba(255,255,255,0.25)" : theme.colors.brand[50] },
+                          { backgroundColor: active ? theme.onGradient.surfaceStrong : theme.colors.brand[50] },
                         ]}
                       >
-                        <Text variant="caption" style={{ color: active ? "#FFFFFF" : theme.colors.brand[700], fontSize: 9 }}>
+                        <Text variant="caption" style={{ color: active ? theme.colors.brand.contrast : theme.colors.brand[700], fontSize: 9 }}>
                           PRO
                         </Text>
                       </View>
@@ -572,10 +605,6 @@ function AiControls({
     </>
   );
 }
-
-// Imports collected at bottom to keep header clean
-import { Pressable } from "react-native";
-import { Icon } from "react-native-paper";
 
 const styles = StyleSheet.create({
   container: { flex: 1 },

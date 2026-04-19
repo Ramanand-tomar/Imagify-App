@@ -2,9 +2,10 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import { View } from "react-native";
 
-import { AppHeader, Button, Card, Divider, Input, Screen, SectionHeader, Text } from "@/components/ui";
+import { AppHeader, Button, Card, Divider, Input, Screen, SectionHeader } from "@/components/ui";
 import { useSnackbar } from "@/providers/SnackbarProvider";
 import { useAuthStore } from "@/stores/authStore";
+import { extractErrorMessage } from "@/utils/errors";
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -43,8 +44,8 @@ export default function EditProfileScreen() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-    } catch (err: any) {
-      snackbar.error(err.response?.data?.detail ?? "Failed to update profile");
+    } catch (err: unknown) {
+      snackbar.error(extractErrorMessage(err, "Failed to update profile"));
     } finally {
       setLoading(false);
     }

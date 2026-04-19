@@ -188,21 +188,34 @@ type ShadowToken = {
   elevation: number;
 };
 
-const shadowFor = (elevation: number, opacity: number, radius: number, dy: number): ShadowToken => ({
-  shadowColor: "#0F172A",
+const shadowFor = (elevation: number, opacity: number, radius: number, dy: number, color: string): ShadowToken => ({
+  shadowColor: color,
   shadowOffset: { width: 0, height: dy },
   shadowOpacity: Platform.OS === "android" ? 0 : opacity,
   shadowRadius: radius,
   elevation: Platform.OS === "android" ? elevation : 0,
 });
 
-export const shadow = {
-  none: shadowFor(0, 0, 0, 0),
-  xs: shadowFor(1, 0.04, 2, 1),
-  sm: shadowFor(2, 0.06, 6, 2),
-  md: shadowFor(4, 0.08, 12, 4),
-  lg: shadowFor(8, 0.12, 20, 8),
-  xl: shadowFor(16, 0.16, 32, 16),
+const makeShadow = (color: string) => ({
+  none: shadowFor(0, 0, 0, 0, color),
+  xs: shadowFor(1, 0.04, 2, 1, color),
+  sm: shadowFor(2, 0.06, 6, 2, color),
+  md: shadowFor(4, 0.08, 12, 4, color),
+  lg: shadowFor(8, 0.12, 20, 8, color),
+  xl: shadowFor(16, 0.16, 32, 16, color),
+});
+
+/** Legacy light-mode shadow export. Prefer `theme.shadow` from `useAppTheme`. */
+export const shadow = makeShadow(palette.slate[900]);
+export const shadowLight = makeShadow(palette.slate[900]);
+export const shadowDark = makeShadow(palette.black);
+
+export const onGradient = {
+  primary: palette.white,
+  secondary: "rgba(255,255,255,0.85)",
+  tertiary: "rgba(255,255,255,0.65)",
+  surface: "rgba(255,255,255,0.18)",
+  surfaceStrong: "rgba(255,255,255,0.25)",
 } as const;
 
 export const fontFamily = {
@@ -265,4 +278,5 @@ export type Theme = {
   gradients: typeof gradients;
   motion: typeof motion;
   fontFamily: typeof fontFamily;
+  onGradient: typeof onGradient;
 };

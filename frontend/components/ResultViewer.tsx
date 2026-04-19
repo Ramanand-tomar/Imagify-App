@@ -1,4 +1,4 @@
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
@@ -7,13 +7,8 @@ import { Icon, TextInput as PaperInput } from "react-native-paper";
 import { Badge, Button, Card, Text } from "@/components/ui";
 import { useAuthStore } from "@/stores/authStore";
 import { useAppTheme } from "@/theme/useTheme";
-
-const API_BASE = (process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
-
-function resolveDownloadUrl(raw: string): string {
-  if (/^https?:\/\//i.test(raw)) return raw;
-  return `${API_BASE}${raw.startsWith("/") ? raw : `/${raw}`}`;
-}
+import { resolveUrl } from "@/utils/env";
+import { extractErrorMessage, isAuthError } from "@/utils/errors";
 
 export interface ResultViewerProps {
   filename: string;
@@ -62,18 +57,19 @@ export function ResultViewer({ filename: serverFilename, mimeType, sizeBytes, do
   const effectiveName = sanitize(baseName) + ext;
 
   const ensureLocalCopy = async (): Promise<string> => {
-    const target = `${FileSystem.cacheDirectory}${effectiveName}`;
-    // Overwrite any previous copy with the same name
-    try {
-      await FileSystem.deleteAsync(target, { idempotent: true });
-    } catch {
-      /* ignore */
+    if (!FileSystem.cacheDirectory) {
+      throw new Error("Device storage is unavailable");
     }
+    const target = `${FileSystem.cacheDirectory}${effectiveName}`;
+    await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
     const token = useAuthStore.getState().accessToken;
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-    const resolved = resolveDownloadUrl(downloadUrl);
+    const resolved = resolveUrl(downloadUrl);
     const result = await FileSystem.downloadAsync(resolved, target, { headers });
     if (result.status >= 400) {
+      if (result.status === 401 || result.status === 403) {
+        throw new Error("Your session expired. Please sign in again.");
+      }
       throw new Error(`Download failed (HTTP ${result.status})`);
     }
     return result.uri;
@@ -95,8 +91,8 @@ export function ResultViewer({ filename: serverFilename, mimeType, sizeBytes, do
     try {
       await openShareSheet(`Save ${effectiveName}`);
       setInfo(`Saved as ${effectiveName}`);
-    } catch (e: any) {
-      setError(e?.message ?? "Save failed");
+    } catch (e: unknown) {
+      setError(isAuthError(e) ? "Your session expired. Please sign in again." : extractErrorMessage(e, "Save failed"));
     } finally {
       setBusy(null);
     }
@@ -108,8 +104,8 @@ export function ResultViewer({ filename: serverFilename, mimeType, sizeBytes, do
     setBusy("share");
     try {
       await openShareSheet(`Share ${effectiveName}`);
-    } catch (e: any) {
-      setError(e?.message ?? "Share failed");
+    } catch (e: unknown) {
+      setError(isAuthError(e) ? "Your session expired. Please sign in again." : extractErrorMessage(e, "Share failed"));
     } finally {
       setBusy(null);
     }

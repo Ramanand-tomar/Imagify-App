@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { StyleSheet, View, type TextInputProps as RNTextInputProps } from "react-native";
+import { StyleSheet, TextInput as RNTextInput, View } from "react-native";
 import { HelperText, TextInput, type TextInputProps } from "react-native-paper";
 
 import { useAppTheme } from "@/theme/useTheme";
@@ -14,7 +14,7 @@ interface InputProps extends Omit<TextInputProps, "theme" | "mode" | "error"> {
   onRightIconPress?: () => void;
 }
 
-export const Input = forwardRef<any, InputProps>(function Input(
+export const Input = forwardRef<RNTextInput, InputProps>(function Input(
   { label, errorText, helper, leftIcon, rightIcon, onRightIconPress, style, ...rest },
   ref,
 ) {
@@ -27,7 +27,7 @@ export const Input = forwardRef<any, InputProps>(function Input(
         {label}
       </Text>
       <TextInput
-        ref={ref as any}
+        ref={ref}
         mode="outlined"
         {...rest}
         dense={false}
@@ -75,9 +75,6 @@ export const Input = forwardRef<any, InputProps>(function Input(
     </View>
   );
 });
-
-// Re-export to silence unused type in some TS setups
-export type { RNTextInputProps };
 
 const styles = StyleSheet.create({
   wrap: { marginBottom: 4 },

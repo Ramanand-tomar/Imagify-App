@@ -1,11 +1,26 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Alert, Linking, Pressable, StyleSheet, View } from "react-native";
 import { Icon } from "react-native-paper";
 
 import { BottomSheet, Text, type SheetAction } from "@/components/ui";
 import { useAppTheme } from "@/theme/useTheme";
+import { createLogger } from "@/utils/logger";
+
+const log = createLogger("FileUploader");
+
+function promptOpenSettings(kind: "camera" | "photos") {
+  const label = kind === "camera" ? "Camera" : "Photos";
+  Alert.alert(
+    `${label} permission needed`,
+    `Enable ${label.toLowerCase()} access in Settings to continue.`,
+    [
+      { text: "Cancel", style: "cancel" },
+      { text: "Open Settings", onPress: () => Linking.openSettings().catch(() => {}) },
+    ],
+  );
+}
 
 export interface PickedFile {
   uri: string;
@@ -51,56 +66,79 @@ export function FileUploader({
 
   const pickDocument = async () => {
     setError(null);
-    const mimeFilter = accept === "image" ? ["image/*"] : accept === "pdf" ? ["application/pdf"] : ["*/*"];
-    const result = await DocumentPicker.getDocumentAsync({ type: mimeFilter, multiple: false, copyToCacheDirectory: true });
-    if (result.canceled || !result.assets?.length) return;
-    const asset = result.assets[0];
-    const size = asset.size ?? 0;
-    const mime = asset.mimeType ?? "application/octet-stream";
-    const err = validate(size, mime);
-    if (err) return setError(err);
-    onFilePicked({ uri: asset.uri, name: asset.name, mimeType: mime, size });
+    try {
+      const mimeFilter = accept === "image" ? ["image/*"] : accept === "pdf" ? ["application/pdf"] : ["*/*"];
+      const result = await DocumentPicker.getDocumentAsync({ type: mimeFilter, multiple: false, copyToCacheDirectory: true });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      const size = asset.size ?? 0;
+      const mime = asset.mimeType ?? "application/octet-stream";
+      const err = validate(size, mime);
+      if (err) return setError(err);
+      onFilePicked({ uri: asset.uri, name: asset.name, mimeType: mime, size });
+    } catch (e) {
+      log.warn("Document pick failed", e);
+      setError("Could not open the file picker");
+    }
   };
 
   const pickFromGallery = async () => {
     setError(null);
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return setError("Permission to access photos denied");
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 1,
-    });
-    if (result.canceled || !result.assets?.length) return;
-    const asset = result.assets[0];
-    const size = asset.fileSize ?? 0;
-    const mime = asset.mimeType ?? "image/jpeg";
-    const err = validate(size, mime);
-    if (err) return setError(err);
-    onFilePicked({
-      uri: asset.uri,
-      name: asset.fileName ?? `upload-${Date.now()}.jpg`,
-      mimeType: mime,
-      size,
-    });
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        if (perm.canAskAgain === false) promptOpenSettings("photos");
+        else setError("Permission to access photos denied");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 1,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      const size = asset.fileSize ?? 0;
+      const mime = asset.mimeType ?? "image/jpeg";
+      const err = validate(size, mime);
+      if (err) return setError(err);
+      onFilePicked({
+        uri: asset.uri,
+        name: asset.fileName ?? `upload-${Date.now()}.jpg`,
+        mimeType: mime,
+        size,
+      });
+    } catch (e) {
+      log.warn("Gallery pick failed", e);
+      setError("Could not open the gallery");
+    }
   };
 
   const pickFromCamera = async () => {
     setError(null);
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) return setError("Camera permission denied");
-    const result = await ImagePicker.launchCameraAsync({ quality: 1 });
-    if (result.canceled || !result.assets?.length) return;
-    const asset = result.assets[0];
-    const size = asset.fileSize ?? 0;
-    const mime = asset.mimeType ?? "image/jpeg";
-    const err = validate(size, mime);
-    if (err) return setError(err);
-    onFilePicked({
-      uri: asset.uri,
-      name: asset.fileName ?? `camera-${Date.now()}.jpg`,
-      mimeType: mime,
-      size,
-    });
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        if (perm.canAskAgain === false) promptOpenSettings("camera");
+        else setError("Camera permission denied");
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({ quality: 1 });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      const size = asset.fileSize ?? 0;
+      const mime = asset.mimeType ?? "image/jpeg";
+      const err = validate(size, mime);
+      if (err) return setError(err);
+      onFilePicked({
+        uri: asset.uri,
+        name: asset.fileName ?? `camera-${Date.now()}.jpg`,
+        mimeType: mime,
+        size,
+      });
+    } catch (e) {
+      log.warn("Camera pick failed", e);
+      setError("Could not open the camera");
+    }
   };
 
   const openPicker = () => {

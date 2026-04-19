@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Icon } from "react-native-paper";
 
 import { Avatar, Button, Card, Screen, SectionHeader, Text } from "@/components/ui";
@@ -23,10 +23,19 @@ export default function ProfileScreen() {
   const logout = useAuthStore((s) => s.logout);
   const resetTasks = useTaskStore((s) => s.reset);
 
-  const onLogout = async () => {
-    await logout();
-    resetTasks();
-    router.replace("/auth/login");
+  const onLogout = () => {
+    Alert.alert("Log out?", "You'll need to sign in again to access your tasks.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Log out",
+        style: "destructive",
+        onPress: async () => {
+          await logout();
+          resetTasks();
+          router.replace("/auth/login");
+        },
+      },
+    ]);
   };
 
   const accountRows: ActionRow[] = [

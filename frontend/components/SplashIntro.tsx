@@ -75,14 +75,22 @@ export function SplashIntro({ onFinished, duration = 1800 }: SplashIntroProps) {
       >
         <View style={{ flex: 1 }} />
         <Animated.View style={[styles.logoRow, logoStyle]}>
-          <View style={styles.logoMark}>
+          <View
+            style={[
+              styles.logoMark,
+              {
+                backgroundColor: theme.onGradient.surface,
+                borderColor: theme.onGradient.surfaceStrong,
+              },
+            ]}
+          >
             <AppLogo size={96} variant="gradient" />
           </View>
         </Animated.View>
         <Animated.View style={[styles.textWrap, textStyle]}>
           <Text
             style={{
-              color: "#FFFFFF",
+              color: theme.onGradient.primary,
               fontFamily: theme.fontFamily.bold,
               fontSize: 36,
               lineHeight: 42,
@@ -95,19 +103,19 @@ export function SplashIntro({ onFinished, duration = 1800 }: SplashIntroProps) {
           <Text
             variant="body"
             align="center"
-            style={{ color: "rgba(255,255,255,0.85)", marginTop: 8 }}
+            style={{ color: theme.onGradient.secondary, marginTop: 8 }}
           >
             AI-powered PDF & image tools
           </Text>
         </Animated.View>
         <View style={{ flex: 1 }} />
         <Animated.View style={[styles.credit, creditStyle]}>
-          <Text variant="caption" style={{ color: "rgba(255,255,255,0.72)" }}>
+          <Text variant="caption" style={{ color: theme.onGradient.tertiary }}>
             Developed by
           </Text>
           <Text
             style={{
-              color: "#FFFFFF",
+              color: theme.onGradient.primary,
               fontFamily: theme.fontFamily.semibold,
               fontSize: 14,
               lineHeight: 18,
@@ -130,11 +138,9 @@ const styles = StyleSheet.create({
     width: 128,
     height: 128,
     borderRadius: 36,
-    backgroundColor: "rgba(255,255,255,0.14)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
     padding: 16,
   },
   textWrap: { alignItems: "center" },

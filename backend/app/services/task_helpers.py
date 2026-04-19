@@ -4,6 +4,7 @@ sync variant for Celery workers (async PDF ops).
 """
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -15,8 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.services import storage_service
+from app.services.storage_service import StorageError
 from app.models.processed_file import ProcessedFile
 from app.models.task import Task, TaskStatus, TaskType
+
+logger = logging.getLogger("imagify.task_helpers")
 
 SHARED_TMP = Path("/tmp/imagify")
 MAX_FILE_BYTES = 50 * 1024 * 1024
@@ -76,12 +80,29 @@ async def record_sync_result(
     filename: str,
     mime_type: str,
 ) -> tuple[Task, ProcessedFile]:
-    """For sync ops: upload to ImageKit + persist Task + ProcessedFile in one go."""
+    """For sync ops: upload to ImageKit + persist Task + ProcessedFile in one go.
+
+    On storage failure, raises HTTPException(502) so the client gets a clear
+    "couldn't reach storage" message rather than a generic 500.
+    """
     task = Task(user_id=user_id, task_type=task_type, status=TaskStatus.SUCCESS, progress=100)
     db.add(task)
     await db.flush()
 
-    file_id, file_path, url = storage_service.upload_file(result_bytes, filename, task_id=str(task.id))
+    try:
+        file_id, file_path, url = storage_service.upload_file(
+            result_bytes, filename, task_id=str(task.id)
+        )
+    except StorageError as exc:
+        # Mark the task as failed so the client sees the right state on retry
+        task.status = TaskStatus.FAILED
+        task.error_message = str(exc)[:1000]
+        await db.commit()
+        logger.error("Storage upload failed for task %s: %s", task.id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Couldn't save the result to storage. Please try again.",
+        ) from exc
 
     pf = ProcessedFile(
         task_id=task.id,
@@ -130,7 +151,20 @@ def finalize_task_sync(
     filename: str,
     mime_type: str,
 ) -> ProcessedFile:
-    file_id, file_path, url = storage_service.upload_file(result_bytes, filename, task_id=str(task.id))
+    """Worker-side finalize. On storage failure, marks the task FAILED and
+    re-raises StorageError so the Celery task retry policy can catch it.
+    """
+    try:
+        file_id, file_path, url = storage_service.upload_file(
+            result_bytes, filename, task_id=str(task.id)
+        )
+    except StorageError as exc:
+        logger.error("Worker storage upload failed for task %s: %s", task.id, exc)
+        task.status = TaskStatus.FAILED
+        task.error_message = f"Storage upload failed: {exc}"[:1000]
+        db.commit()
+        raise
+
     pf = ProcessedFile(
         task_id=task.id,
         imagekit_file_id=file_id,

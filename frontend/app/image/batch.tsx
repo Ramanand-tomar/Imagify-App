@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
@@ -20,6 +20,7 @@ import {
 import { api } from "@/services/api";
 import { useTaskStore, type BatchStatus } from "@/stores/taskStore";
 import { useAppTheme } from "@/theme/useTheme";
+import { extractErrorMessage } from "@/utils/errors";
 
 type Operation = "compress" | "convert" | "resize" | "histogram" | "denoise";
 
@@ -40,6 +41,15 @@ export default function BatchImageScreen() {
   const [uploadPercent, setUploadPercent] = useState(0);
 
   const pollBatch = useTaskStore((s) => s.pollBatch);
+  const cancelBatchRef = useRef<(() => void) | null>(null);
+
+  useEffect(
+    () => () => {
+      cancelBatchRef.current?.();
+      cancelBatchRef.current = null;
+    },
+    [],
+  );
 
   const addFile = (f: PickedFile) => {
     if (files.length >= 5) {
@@ -71,26 +81,29 @@ export default function BatchImageScreen() {
 
       const formData = new FormData();
       files.forEach((file) => {
-        // @ts-ignore
-        formData.append("files", { uri: file.uri, name: file.name, type: file.mimeType });
+        formData.append(
+          "files",
+          { uri: file.uri, name: file.name, type: file.mimeType } as unknown as Blob,
+        );
       });
       formData.append("operation", operation);
 
-      const finalParams: Record<string, any> = {};
-      if (operation === "compress") finalParams.quality = parseInt(params.quality) || 80;
+      const finalParams: Record<string, unknown> = {};
+      if (operation === "compress") finalParams.quality = parseInt(params.quality, 10) || 80;
       if (operation === "convert") {
         finalParams.format = params.format;
-        finalParams.quality = parseInt(params.quality) || 80;
+        finalParams.quality = parseInt(params.quality, 10) || 80;
       }
       if (operation === "resize") {
-        if (params.width) finalParams.width = parseInt(params.width);
-        if (params.height) finalParams.height = parseInt(params.height);
+        if (params.width) finalParams.width = parseInt(params.width, 10);
+        if (params.height) finalParams.height = parseInt(params.height, 10);
         finalParams.maintain_ratio = true;
       }
       formData.append("params_json", JSON.stringify(finalParams));
 
-      const { data } = await api.post("/image/batch", formData, {
+      const { data } = await api.post<{ batch_id: string }>("/image/batch", formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
         onUploadProgress: (ev) => {
           if (ev.total) {
             const pct = Math.round((ev.loaded * 100) / ev.total);
@@ -98,21 +111,27 @@ export default function BatchImageScreen() {
           }
         },
       });
+      if (!data?.batch_id) throw new Error("Server did not return a batch id");
 
       setPhase("processing");
-      pollBatch(data.batch_id, (status) => {
+      cancelBatchRef.current?.();
+      cancelBatchRef.current = pollBatch(data.batch_id, (status) => {
         setBatchStatus(status);
         if (status.completed + status.failed === status.total) {
           setPhase("success");
+          cancelBatchRef.current?.();
+          cancelBatchRef.current = null;
         }
       });
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to start batch processing");
+    } catch (err: unknown) {
+      setError(extractErrorMessage(err, "Failed to start batch processing"));
       setPhase("error");
     }
   };
 
   const handleReset = () => {
+    cancelBatchRef.current?.();
+    cancelBatchRef.current = null;
     setFiles([]);
     setBatchStatus(null);
     setPhase("idle");

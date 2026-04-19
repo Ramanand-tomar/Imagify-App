@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
@@ -14,13 +14,11 @@ import { api } from "@/services/api";
 import { useAuthStore } from "@/stores/authStore";
 import { useTaskStore, type Task } from "@/stores/taskStore";
 import { useAppTheme } from "@/theme/useTheme";
+import { resolveUrl } from "@/utils/env";
+import { extractErrorMessage, isAuthError } from "@/utils/errors";
+import { createLogger } from "@/utils/logger";
 
-const API_BASE = (process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
-
-function resolveUrl(raw: string): string {
-  if (/^https?:\/\//i.test(raw)) return raw;
-  return `${API_BASE}${raw.startsWith("/") ? raw : `/${raw}`}`;
-}
+const log = createLogger("history");
 
 const EXPIRY_DAYS = 7;
 const PAGE_SIZE = 20;
@@ -81,8 +79,13 @@ export default function TaskHistoryScreen() {
         setTotal(data.total);
         setItems((prev) => (mode === "more" ? [...prev, ...data.items] : data.items));
         setPage(data.page);
-      } catch {
-        snackbar.error("Failed to load task history");
+      } catch (err) {
+        log.warn("Failed to load task history", err);
+        if (isAuthError(err)) {
+          snackbar.error("Your session expired. Please sign in again.");
+        } else {
+          snackbar.error(extractErrorMessage(err, "Failed to load task history"));
+        }
       } finally {
         setInitialLoading(false);
         setRefreshing(false);
@@ -114,6 +117,10 @@ export default function TaskHistoryScreen() {
       snackbar.error("This download link has expired");
       return;
     }
+    if (!FileSystem.cacheDirectory) {
+      snackbar.error("Device storage unavailable");
+      return;
+    }
     try {
       const { data } = await api.get<{
         download_url: string;
@@ -121,17 +128,22 @@ export default function TaskHistoryScreen() {
         mime_type: string;
       }>(`/tasks/${task.id}/result`);
 
-      const target = `${FileSystem.cacheDirectory}${data.original_filename}`;
-      try {
-        await FileSystem.deleteAsync(target, { idempotent: true });
-      } catch {
-        /* ignore */
+      if (!data?.download_url) {
+        throw new Error("Download URL missing from server response");
       }
+
+      const target = `${FileSystem.cacheDirectory}${data.original_filename}`;
+      await FileSystem.deleteAsync(target, { idempotent: true }).catch(() => {});
+
       const token = useAuthStore.getState().accessToken;
       const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
       const result = await FileSystem.downloadAsync(resolveUrl(data.download_url), target, { headers });
       if (result.status >= 400) {
-        throw new Error(`HTTP ${result.status}`);
+        if (result.status === 401 || result.status === 403) {
+          snackbar.error("Your session expired. Please sign in again.");
+          return;
+        }
+        throw new Error(`Download failed (HTTP ${result.status})`);
       }
       if (!(await Sharing.isAvailableAsync())) {
         snackbar.info(`Saved to cache: ${data.original_filename}`);
@@ -142,8 +154,13 @@ export default function TaskHistoryScreen() {
         dialogTitle: `Save ${data.original_filename}`,
         UTI: data.mime_type,
       });
-    } catch {
-      snackbar.error("Result not available");
+    } catch (err) {
+      log.warn("Download failed", err);
+      if (isAuthError(err)) {
+        snackbar.error("Your session expired. Please sign in again.");
+      } else {
+        snackbar.error(extractErrorMessage(err, "Couldn't download result"));
+      }
     }
   };
 

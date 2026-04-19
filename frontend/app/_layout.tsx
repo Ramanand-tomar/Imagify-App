@@ -7,6 +7,7 @@ import {
 } from "@expo-google-fonts/poppins";
 import { Slot, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, useColorScheme, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -19,6 +20,9 @@ import { SnackbarProvider } from "@/providers/SnackbarProvider";
 import { useAuthStore } from "@/stores/authStore";
 import { colors } from "@/theme/tokens";
 import { darkTheme, lightTheme } from "@/theme/paperTheme";
+import { createLogger } from "@/utils/logger";
+
+const log = createLogger("root");
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -31,10 +35,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const hydrate = useAuthStore((s) => s.hydrate);
   const scheme = useColorScheme();
-  const bg = scheme === "dark" ? colors.dark.surface.background : colors.light.surface.background;
+  const mode = scheme === "dark" ? "dark" : "light";
+  const palette = colors[mode];
 
   useEffect(() => {
-    hydrate();
+    hydrate().catch((err) => log.warn("Auth hydrate failed", err));
   }, [hydrate]);
 
   useEffect(() => {
@@ -49,8 +54,15 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (!hydrated) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: bg }}>
-        <ActivityIndicator size="large" color={colors.light.brand.default} />
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: palette.surface.background,
+        }}
+      >
+        <ActivityIndicator size="large" color={palette.brand.default} />
       </View>
     );
   }
@@ -59,7 +71,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout() {
   const scheme = useColorScheme();
-  const theme = scheme === "dark" ? darkTheme : lightTheme;
+  const mode = scheme === "dark" ? "dark" : "light";
+  const theme = mode === "dark" ? darkTheme : lightTheme;
   const [splashDone, setSplashDone] = useState(false);
 
   const [fontsLoaded, fontError] = useFonts({
@@ -68,6 +81,10 @@ export default function RootLayout() {
     Poppins_600SemiBold,
     Poppins_700Bold,
   });
+
+  useEffect(() => {
+    if (fontError) log.warn("Font load failed, falling back to system", fontError);
+  }, [fontError]);
 
   const onReady = useCallback(async () => {
     if (fontsLoaded || fontError) {
@@ -82,7 +99,8 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError) return null;
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors[mode].surface.background }}>
+      <StatusBar style={mode === "dark" ? "light" : "dark"} />
       <SafeAreaProvider>
         <PaperProvider theme={theme}>
           <ErrorBoundary>

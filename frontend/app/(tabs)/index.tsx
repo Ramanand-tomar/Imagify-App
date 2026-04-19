@@ -14,10 +14,14 @@ import {
   SectionHeader,
   Text,
 } from "@/components/ui";
+import { useSnackbar } from "@/providers/SnackbarProvider";
 import { pingServer } from "@/services/api";
 import { useAuthStore } from "@/stores/authStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useAppTheme } from "@/theme/useTheme";
+import { createLogger } from "@/utils/logger";
+
+const log = createLogger("Home");
 
 interface FeatureCard {
   key: string;
@@ -46,6 +50,7 @@ function firstName(input?: string): string {
 export default function HomeScreen() {
   const theme = useAppTheme();
   const router = useRouter();
+  const snackbar = useSnackbar();
   const history = useTaskStore((s) => s.history);
   const loadHistory = useTaskStore((s) => s.loadHistory);
   const user = useAuthStore((s) => s.user);
@@ -57,16 +62,22 @@ export default function HomeScreen() {
       if (active) setWakingUp(true);
     }, 3000);
 
-    pingServer().then(() => {
-      clearTimeout(timer);
-      if (active) setWakingUp(false);
-    });
+    pingServer()
+      .catch(() => false)
+      .finally(() => {
+        clearTimeout(timer);
+        if (active) setWakingUp(false);
+      });
 
-    loadHistory().catch(() => {});
+    loadHistory().catch((err) => {
+      log.warn("History load failed", err);
+      if (active) snackbar.error("Couldn't load recent tasks. Pull to refresh.");
+    });
     return () => {
       active = false;
+      clearTimeout(timer);
     };
-  }, [loadHistory]);
+  }, [loadHistory, snackbar]);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.surface.background }}>
@@ -88,21 +99,21 @@ export default function HomeScreen() {
 
         <Pressable onPress={() => router.push("/image/enhance")} style={{ marginTop: 4 }}>
           <GradientSurface radius="2xl" contentStyle={styles.bannerContent}>
-            <View style={styles.bannerIconWrap}>
-              <Icon source="star-four-points" size={26} color="#FFFFFF" />
+            <View style={[styles.bannerIconWrap, { backgroundColor: theme.onGradient.surface }]}>
+              <Icon source="star-four-points" size={26} color={theme.onGradient.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text variant="caption" style={{ color: "rgba(255,255,255,0.85)" }}>
+              <Text variant="caption" style={{ color: theme.onGradient.secondary }}>
                 NEW · AI
               </Text>
-              <Text variant="h3" style={{ color: "#FFFFFF", marginTop: 2 }}>
+              <Text variant="h3" style={{ color: theme.onGradient.primary, marginTop: 2 }}>
                 Try AI Enhancement
               </Text>
-              <Text variant="bodySm" style={{ color: "rgba(255,255,255,0.85)", marginTop: 2 }}>
+              <Text variant="bodySm" style={{ color: theme.onGradient.secondary, marginTop: 2 }}>
                 Upscale photos up to 4× and restore details
               </Text>
             </View>
-            <Icon source="chevron-right" size={22} color="#FFFFFF" />
+            <Icon source="chevron-right" size={22} color={theme.onGradient.primary} />
           </GradientSurface>
         </Pressable>
 
@@ -151,7 +162,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.18)",
     alignItems: "center",
     justifyContent: "center",
   },

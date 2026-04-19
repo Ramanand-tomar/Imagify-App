@@ -7,10 +7,17 @@
     "orientation": "portrait",
     "scheme": "imagify",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.imagify.app"
+      "bundleIdentifier": "com.imagify.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Imagify needs access to your photos so you can upload images for processing.",
+        "NSCameraUsageDescription": "Imagify needs camera access so you can scan documents.",
+        "NSPhotoLibraryAddUsageDescription": "Imagify saves processed files to your photo library when you tap Save."
+      }
     },
     "android": {
       "package": "com.imagify.app",
@@ -19,7 +26,10 @@
         "backgroundColor": "#6366F1"
       },
       "permissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.INTERNET"
       ]
     },
     "web": {
@@ -37,7 +47,8 @@
           "cameraPermission": "Imagify needs camera access so you can scan documents."
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true

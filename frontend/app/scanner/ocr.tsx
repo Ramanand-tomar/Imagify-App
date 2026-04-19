@@ -1,5 +1,5 @@
 import * as Clipboard from "expo-clipboard";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Share, StyleSheet, View } from "react-native";
 import { Icon, Menu, TextInput } from "react-native-paper";
@@ -18,8 +18,11 @@ import {
 import { useSnackbar } from "@/providers/SnackbarProvider";
 import { api } from "@/services/api";
 import { ocrService } from "@/services/ocrService";
+import { useAuthStore } from "@/stores/authStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useAppTheme } from "@/theme/useTheme";
+import { resolveUrl } from "@/utils/env";
+import { extractErrorMessage } from "@/utils/errors";
 
 export default function OCRScreen() {
   const theme = useAppTheme();
@@ -71,10 +74,15 @@ export default function OCRScreen() {
   const fetchResult = async (id: string) => {
     try {
       const res = await api.get<{ download_url: string }>(`/tasks/${id}/result`);
-      const text = await fetch(res.data.download_url).then((r) => r.text());
-      setResult(text);
-    } catch {
-      snackbar.error("Failed to download extraction result.");
+      if (!res.data?.download_url) throw new Error("Missing download_url");
+      const token = useAuthStore.getState().accessToken;
+      const response = await fetch(resolveUrl(res.data.download_url), {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (!response.ok) throw new Error(`Download failed (HTTP ${response.status})`);
+      setResult(await response.text());
+    } catch (err) {
+      snackbar.error(extractErrorMessage(err, "Failed to download extraction result."));
     } finally {
       setLoading(false);
     }
@@ -93,9 +101,8 @@ export default function OCRScreen() {
         setResult(data.text);
         setLoading(false);
       }
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || err.message || "Unknown error";
-      snackbar.error(`Error: ${msg}`);
+    } catch (err: unknown) {
+      snackbar.error(`Error: ${extractErrorMessage(err, "Unknown error")}`);
       setLoading(false);
     }
   };

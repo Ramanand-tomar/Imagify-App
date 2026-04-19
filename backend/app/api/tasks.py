@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import uuid
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -13,10 +15,15 @@ from app.models.processed_file import ProcessedFile
 from app.models.task import Task, TaskStatus
 from app.models.user import User
 from app.schemas.task import BatchStatusOut, TaskHistoryItem, TaskHistoryOut, TaskResultOut, TaskStatusOut
+from app.services.storage_service import StorageError, get_signed_url, storage_healthcheck
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 logger = logging.getLogger("imagify.tasks")
+
+DOWNLOAD_TIMEOUT_SECONDS = 90.0
+DOWNLOAD_RETRIES = 1  # one retry on transient failure
+SIGNED_URL_TTL_SECONDS = 3600
 
 
 def download_url_for(task_id: uuid.UUID) -> str:
@@ -77,8 +84,6 @@ async def task_status(
     return TaskStatusOut.model_validate(task)
 
 
-
-
 @router.get("/{task_id}/result", response_model=TaskResultOut)
 async def task_result(
     task_id: uuid.UUID,
@@ -103,11 +108,10 @@ async def task_result(
     if pf is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result file not found")
 
-    expires_in = 3600
     return TaskResultOut(
         task_id=task.id,
         download_url=download_url_for(task.id),
-        expires_in_seconds=expires_in,
+        expires_in_seconds=SIGNED_URL_TTL_SECONDS,
         original_filename=pf.original_filename,
         mime_type=pf.mime_type,
         size_bytes=pf.size_bytes,
@@ -143,7 +147,7 @@ async def batch_status(
             results.append(TaskResultOut(
                 task_id=t.id,
                 download_url=download_url_for(t.id),
-                expires_in_seconds=3600,
+                expires_in_seconds=SIGNED_URL_TTL_SECONDS,
                 original_filename=pf.original_filename,
                 mime_type=pf.mime_type,
                 size_bytes=pf.size_bytes,
@@ -160,6 +164,79 @@ async def batch_status(
     )
 
 
+# ---- Download proxy ---------------------------------------------------------
+
+
+def _content_disposition(filename: str) -> str:
+    """Build an RFC 5987-safe Content-Disposition header value."""
+    safe_ascii = filename.encode("ascii", "ignore").decode("ascii").strip() or "file"
+    encoded = quote(filename, safe="")
+    return f"attachment; filename=\"{safe_ascii}\"; filename*=UTF-8''{encoded}"
+
+
+async def _open_upstream(url: str) -> tuple[httpx.AsyncClient, httpx.Response]:
+    """Open a streaming GET against ``url``, with one retry on transient failures.
+
+    Returns the live (client, response). Caller is responsible for closing both.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(DOWNLOAD_RETRIES + 1):
+        client = httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT_SECONDS, follow_redirects=True)
+        try:
+            response = await client.send(
+                client.build_request("GET", url, headers={"User-Agent": "Imagify/1.0"}),
+                stream=True,
+            )
+        except (httpx.HTTPError, httpx.NetworkError) as exc:
+            last_exc = exc
+            await client.aclose()
+            logger.warning("Upstream fetch attempt %d failed: %s", attempt + 1, exc)
+            if attempt < DOWNLOAD_RETRIES:
+                await asyncio.sleep(0.4 * (attempt + 1))
+                continue
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Could not reach storage. Please try again.",
+            ) from exc
+
+        # Retry on transient upstream statuses
+        if response.status_code in (502, 503, 504) and attempt < DOWNLOAD_RETRIES:
+            logger.warning("Upstream returned %s on attempt %d, retrying", response.status_code, attempt + 1)
+            await response.aclose()
+            await client.aclose()
+            await asyncio.sleep(0.4 * (attempt + 1))
+            continue
+
+        if response.status_code >= 400:
+            # Read a small snippet for diagnostics, then raise
+            try:
+                snippet = (await response.aread())[:300].decode("utf-8", "replace")
+            except Exception:
+                snippet = "<unreadable>"
+            await response.aclose()
+            await client.aclose()
+            logger.error(
+                "Storage returned %s for %s — %s", response.status_code, url, snippet
+            )
+            if response.status_code == 404:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Result file no longer available",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Storage error ({response.status_code})",
+            )
+
+        return client, response
+
+    # Should not reach here, but keep mypy happy
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Storage unreachable",
+    ) from last_exc
+
+
 @router.get("/{task_id}/download")
 async def download_task_result(
     task_id: uuid.UUID,
@@ -168,8 +245,9 @@ async def download_task_result(
 ):
     """Stream a task's result file from ImageKit through the backend.
 
-    This proxy sidesteps any ImageKit signed-URL / redirect issues and
-    guarantees the client receives the full bytes with correct headers.
+    Always generates a fresh signed URL from the stored file_path so we don't
+    depend on the upload-time URL working forever (or at all, if the account
+    requires signed URLs).
     """
     task = (
         await db.execute(
@@ -186,25 +264,22 @@ async def download_task_result(
             detail=f"Task is not ready (status={task.status.value})",
         )
     pf: ProcessedFile | None = task.processed_file
-    if pf is None or not pf.imagekit_url:
+    if pf is None or not pf.imagekit_file_path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result file not found")
 
-    client = httpx.AsyncClient(timeout=60.0, follow_redirects=True)
+    # Always generate a fresh signed URL from the stored path. This works
+    # whether the ImageKit account restricts unsigned URLs or not.
     try:
-        upstream = await client.send(
-            client.build_request("GET", pf.imagekit_url),
-            stream=True,
-        )
-    except httpx.HTTPError as exc:
-        await client.aclose()
-        logger.error("Failed to fetch from ImageKit: %s", exc)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Upstream fetch failed") from exc
+        signed_url = get_signed_url(pf.imagekit_file_path, expire_seconds=SIGNED_URL_TTL_SECONDS)
+    except StorageError as exc:
+        logger.error("Failed to sign download URL for task %s: %s", task_id, exc)
+        # Fallback: try the stored URL if we have one
+        if pf.imagekit_url:
+            signed_url = pf.imagekit_url
+        else:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not generate download URL") from exc
 
-    if upstream.status_code >= 400:
-        await upstream.aclose()
-        await client.aclose()
-        logger.error("ImageKit returned %s for %s", upstream.status_code, pf.imagekit_url)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Upstream returned an error")
+    client, upstream = await _open_upstream(signed_url)
 
     async def stream_body():
         try:
@@ -214,11 +289,27 @@ async def download_task_result(
             await upstream.aclose()
             await client.aclose()
 
-    # Safe-encode filename for Content-Disposition (ASCII-safe fallback + RFC 5987).
-    safe_name = pf.original_filename.encode("ascii", "ignore").decode("ascii") or "file"
+    # Prefer the upstream Content-Type (in case ImageKit normalises it),
+    # but fall back to what we recorded at upload time.
+    content_type = upstream.headers.get("content-type") or pf.mime_type or "application/octet-stream"
+
     headers = {
-        "Content-Disposition": f'attachment; filename="{safe_name}"',
-        "Content-Length": str(pf.size_bytes),
+        "Content-Disposition": _content_disposition(pf.original_filename or "file"),
         "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
     }
-    return StreamingResponse(stream_body(), media_type=pf.mime_type, headers=headers)
+    # Only forward Content-Length if upstream gave us one; do NOT use the
+    # stored size_bytes here — if upstream is chunked or differs, the client
+    # would get truncated/corrupt data.
+    upstream_length = upstream.headers.get("content-length")
+    if upstream_length and upstream_length.isdigit():
+        headers["Content-Length"] = upstream_length
+
+    return StreamingResponse(stream_body(), media_type=content_type, headers=headers)
+
+
+@router.get("/storage/health", tags=["health"])
+async def storage_health() -> dict[str, str]:
+    """Quick check that ImageKit credentials + SDK are usable."""
+    ok, detail = storage_healthcheck()
+    return {"status": "ok" if ok else "fail", "detail": detail}

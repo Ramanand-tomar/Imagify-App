@@ -6,6 +6,7 @@ import Animated, { useAnimatedStyle, withTiming } from "react-native-reanimated"
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Text } from "@/components/ui";
+import { motion } from "@/theme/tokens";
 import { useAppTheme } from "@/theme/useTheme";
 
 const TAB_META: Record<string, { title: string; icon: string }> = {
@@ -79,12 +80,19 @@ function TabButton({
   inactiveColor: string;
 }) {
   const indicatorStyle = useAnimatedStyle(() => ({
-    opacity: withTiming(focused ? 1 : 0, { duration: 160 }),
-    transform: [{ scaleX: withTiming(focused ? 1 : 0.3, { duration: 180 }) }],
+    opacity: withTiming(focused ? 1 : 0, { duration: motion.duration.fast }),
+    transform: [{ scaleX: withTiming(focused ? 1 : 0.3, { duration: motion.duration.base }) }],
   }));
 
   return (
-    <Pressable onPress={onPress} style={styles.tabBtn} hitSlop={4}>
+    <Pressable
+      onPress={onPress}
+      style={styles.tabBtn}
+      hitSlop={4}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: focused }}
+      accessibilityLabel={title}
+    >
       <Animated.View
         style={[
           styles.indicator,
@@ -98,7 +106,6 @@ function TabButton({
         numberOfLines={1}
         style={{
           color: focused ? activeColor : inactiveColor,
-          fontFamily: focused ? undefined : undefined,
           fontWeight: focused ? "600" : "500",
           marginTop: 2,
         }}

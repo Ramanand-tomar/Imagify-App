@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, uploadMultipart } from "@/services/api";
 import { useTaskStore, type Task } from "@/stores/taskStore";
+import { extractErrorMessage } from "@/utils/errors";
 
 export interface PickedFile {
   uri: string;
@@ -42,7 +43,9 @@ interface UsePdfToolState {
 }
 
 function isEnqueued(data: unknown): data is EnqueuedResponse {
-  return !!data && typeof data === "object" && "status" in data && (data as { status: string }).status === "pending";
+  if (!data || typeof data !== "object") return false;
+  const d = data as Record<string, unknown>;
+  return typeof d.task_id === "string" && d.task_id.length > 0 && d.status === "pending";
 }
 
 export function usePdfTool({ endpoint, asyncTask }: UsePdfToolArgs): UsePdfToolState {
@@ -53,10 +56,31 @@ export function usePdfTool({ endpoint, asyncTask }: UsePdfToolArgs): UsePdfToolS
   const [result, setResult] = useState<ToolResult | null>(null);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const cancelPollRef = useRef<(() => void) | null>(null);
+  const unsubRef = useRef<(() => void) | null>(null);
+  const mountedRef = useRef(true);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      cancelPollRef.current?.();
+      cancelPollRef.current = null;
+      unsubRef.current?.();
+      unsubRef.current = null;
+      abortRef.current?.abort();
+      abortRef.current = null;
+    };
+  }, []);
 
   const reset = useCallback(() => {
     cancelPollRef.current?.();
     cancelPollRef.current = null;
+    unsubRef.current?.();
+    unsubRef.current = null;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (!mountedRef.current) return;
     setPhase("idle");
     setUploadPercent(0);
     setProgress(0);
@@ -65,8 +89,6 @@ export function usePdfTool({ endpoint, asyncTask }: UsePdfToolArgs): UsePdfToolS
     setActiveTask(null);
   }, []);
 
-  useEffect(() => () => cancelPollRef.current?.(), []);
-
   const submit = useCallback<UsePdfToolState["submit"]>(
     async (files, extra) => {
       if (files.length === 0) {
@@ -74,7 +96,11 @@ export function usePdfTool({ endpoint, asyncTask }: UsePdfToolArgs): UsePdfToolS
         return;
       }
       reset();
+      if (!mountedRef.current) return;
       setPhase("uploading");
+
+      const controller = new AbortController();
+      abortRef.current = controller;
 
       try {
         let data: ToolResult | EnqueuedResponse;
@@ -84,7 +110,10 @@ export function usePdfTool({ endpoint, asyncTask }: UsePdfToolArgs): UsePdfToolS
             endpoint,
             files[0],
             extra,
-            (p) => setUploadPercent(p),
+            (p) => {
+              if (mountedRef.current) setUploadPercent(p);
+            },
+            controller.signal,
           );
         } else {
           const form = new FormData();
@@ -94,57 +123,75 @@ export function usePdfTool({ endpoint, asyncTask }: UsePdfToolArgs): UsePdfToolS
           for (const [k, v] of Object.entries(extra)) form.append(k, v);
           const response = await api.post(endpoint, form, {
             headers: { "Content-Type": "multipart/form-data" },
+            timeout: 120000,
+            signal: controller.signal,
             onUploadProgress: (e) => {
+              if (!mountedRef.current) return;
               if (e.total) {
                 const pct = Math.round((e.loaded / e.total) * 100);
                 setUploadPercent(Math.min(100, Math.max(0, pct)));
               }
             },
           });
+          if (response.data === undefined || response.data === null) {
+            throw new Error("Empty response from server");
+          }
           data = response.data;
         }
 
+        if (!mountedRef.current) return;
+
         if (isEnqueued(data) || asyncTask) {
           const taskId = (data as EnqueuedResponse).task_id;
+          if (!taskId) {
+            setError("Server did not return a task id");
+            setPhase("error");
+            return;
+          }
           setPhase("processing");
           const pollCancel = useTaskStore.getState().pollTask(taskId, 1500);
           cancelPollRef.current = pollCancel;
 
           const unsub = useTaskStore.subscribe((state) => {
+            if (!mountedRef.current) return;
             const task = state.active[taskId];
             if (!task) return;
             setActiveTask(task);
-            setProgress(task.progress);
+            setProgress(task.progress ?? 0);
             if (task.status === "success") {
-              unsub();
+              unsubRef.current?.();
+              unsubRef.current = null;
               pollCancel();
+              cancelPollRef.current = null;
               api.get<ToolResult>(`/tasks/${taskId}/result`).then(
                 (r) => {
+                  if (!mountedRef.current) return;
                   setResult(r.data);
                   setPhase("success");
                 },
                 (err) => {
-                  setError(err?.response?.data?.detail ?? "Failed to fetch result");
+                  if (!mountedRef.current) return;
+                  setError(extractErrorMessage(err, "Failed to fetch result"));
                   setPhase("error");
                 },
               );
             } else if (task.status === "failed") {
-              unsub();
+              unsubRef.current?.();
+              unsubRef.current = null;
               pollCancel();
+              cancelPollRef.current = null;
               setError(task.error_message ?? "Task failed");
               setPhase("error");
             }
           });
+          unsubRef.current = unsub;
         } else {
           setResult(data as ToolResult);
           setPhase("success");
         }
       } catch (err: unknown) {
-        const message =
-          (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-          (err as Error)?.message ??
-          "Upload failed";
-        setError(message);
+        if (!mountedRef.current) return;
+        setError(extractErrorMessage(err, "Upload failed"));
         setPhase("error");
       }
     },

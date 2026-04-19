@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { Icon } from "react-native-paper";
 
 import { FileUploader, type PickedFile } from "@/components/FileUploader";
@@ -27,13 +27,13 @@ export default function ScannerTabScreen() {
       </View>
 
       <GradientSurface radius="2xl" colors={theme.gradients.aiGlow} contentStyle={styles.hero}>
-        <View style={styles.heroIcon}>
-          <Icon source="line-scan" size={28} color="#FFFFFF" />
+        <View style={[styles.heroIcon, { backgroundColor: theme.onGradient.surface }]}>
+          <Icon source="line-scan" size={28} color={theme.onGradient.primary} />
         </View>
-        <Text variant="h3" style={{ color: "#FFFFFF", marginTop: 14 }}>
+        <Text variant="h3" style={{ color: theme.onGradient.primary, marginTop: 14 }}>
           Turn paper into digital
         </Text>
-        <Text variant="bodySm" style={{ color: "rgba(255,255,255,0.85)", marginTop: 4 }}>
+        <Text variant="bodySm" style={{ color: theme.onGradient.secondary, marginTop: 4 }}>
           Auto-detect edges, flatten, and export as a clean PDF.
         </Text>
       </GradientSurface>
@@ -69,16 +69,12 @@ export default function ScannerTabScreen() {
   );
 }
 
-// Silence unused import warning for Pressable (kept for future use)
-void Pressable;
-
 const styles = StyleSheet.create({
   hero: { padding: 20, minHeight: 160 },
   heroIcon: {
     width: 48,
     height: 48,
     borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.18)",
     alignItems: "center",
     justifyContent: "center",
   },
