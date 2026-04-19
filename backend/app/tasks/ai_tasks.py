@@ -16,7 +16,7 @@ from app.services.task_helpers import (
     finalize_task_sync,
     load_stashed,
     mark_task_failed_sync,
-    remove_stashed,
+    remove_stashed_unless_retrying,
 )
 
 
@@ -47,9 +47,11 @@ def super_resolution_task(
 ) -> str:
     row_id = uuid.UUID(task_row_id)
     session = SyncSessionLocal()
+    succeeded = False
     try:
         task = _load_task(session, row_id)
         if task is None:
+            succeeded = True
             return "task-not-found"
 
         task.status = TaskStatus.IN_PROGRESS
@@ -65,9 +67,15 @@ def super_resolution_task(
 
         out_name = _with_suffix(original_filename, f"-x{scale}.png")
         finalize_task_sync(session, task, out_bytes, out_name, "image/png")
+        succeeded = True
         return "ok"
     finally:
-        remove_stashed(stash_path)
+        remove_stashed_unless_retrying(
+            stash_path,
+            retries=self.request.retries,
+            max_retries=self.max_retries or 0,
+            succeeded=succeeded,
+        )
         session.close()
 
 
@@ -89,9 +97,11 @@ def low_light_enhance_task(
 ) -> str:
     row_id = uuid.UUID(task_row_id)
     session = SyncSessionLocal()
+    succeeded = False
     try:
         task = _load_task(session, row_id)
         if task is None:
+            succeeded = True
             return "task-not-found"
 
         task.status = TaskStatus.IN_PROGRESS
@@ -107,7 +117,13 @@ def low_light_enhance_task(
 
         out_name = _with_suffix(original_filename, "-lowlight.png")
         finalize_task_sync(session, task, out_bytes, out_name, "image/png")
+        succeeded = True
         return "ok"
     finally:
-        remove_stashed(stash_path)
+        remove_stashed_unless_retrying(
+            stash_path,
+            retries=self.request.retries,
+            max_retries=self.max_retries or 0,
+            succeeded=succeeded,
+        )
         session.close()

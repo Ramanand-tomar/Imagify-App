@@ -1,6 +1,7 @@
+import logging
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
-import uuid
 
 from app.dependencies import get_current_user, get_db
 from app.models.user import User
@@ -15,6 +16,8 @@ from app.services.task_helpers import (
     stash_bytes,
     create_pending_task_async,
 )
+
+logger = logging.getLogger("imagify.ocr")
 
 router = APIRouter(prefix="/ocr", tags=["ocr"])
 
@@ -33,25 +36,40 @@ async def ocr_image(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OCRResultOut:
-    """Sync OCR on uploaded image."""
+    """Sync OCR on uploaded image.
+
+    The extracted text is returned in the response body, so even if archiving
+    the result to storage fails, the user still gets their text back. Storage
+    archive is best-effort.
+    """
     data, filename, _ = await read_upload(file, allowed_mime=IMAGE_MIMES)
     try:
         text = ocr_service.extract_text(data, language=language)
     except OCRServiceError as exc:
         raise _service_error(exc)
 
-    # Record as a task result (sync)
-    result_bytes = text.encode("utf-8")
-    task, _ = await record_sync_result(
-        db,
-        user_id=user.id,
-        task_type=TaskType.OCR,
-        result_bytes=result_bytes,
-        filename=f"{filename}_ocr.txt",
-        mime_type="text/plain",
-    )
+    # Best-effort: archive the result to storage so it appears in history.
+    # Don't fail the request if storage is unavailable — the user already
+    # paid the CPU cost and gets their text back regardless.
+    task_id = None
+    try:
+        result_bytes = text.encode("utf-8")
+        task, _ = await record_sync_result(
+            db,
+            user_id=user.id,
+            task_type=TaskType.OCR,
+            result_bytes=result_bytes,
+            filename=f"{filename}_ocr.txt",
+            mime_type="text/plain",
+        )
+        task_id = task.id
+    except HTTPException as exc:
+        # record_sync_result raises 502 on storage failure — log and continue.
+        logger.warning("OCR archive to storage failed (continuing): %s", exc.detail)
+    except Exception:
+        logger.exception("OCR archive to storage failed unexpectedly (continuing)")
 
-    return OCRResultOut(task_id=task.id, text=text, language=language)
+    return OCRResultOut(task_id=task_id, text=text, language=language)
 
 
 @router.post("/pdf", response_model=AsyncEnqueuedOut, status_code=status.HTTP_202_ACCEPTED)

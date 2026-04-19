@@ -8,13 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from app.api.tasks import download_url_for
-from app.models.task import Task
 from app.dependencies import get_current_user, get_db
-from app.models.task import TaskType, TaskStatus
+from app.models.task import Task, TaskType
 from app.models.user import User
 from app.schemas.image import EnhanceRequest, ImageResultOut, PreviewOut, SessionOut
 from app.schemas.pdf import AsyncEnqueuedOut
-from app.schemas.task import BatchStatusOut, TaskResultOut, TaskStatusOut
 from app.services import image_service
 from app.services.image_service import ImageServiceError
 from app.services.task_helpers import (
@@ -84,7 +82,9 @@ def _service_error(exc: ImageServiceError) -> HTTPException:
 
 def _session_path(session_id: str) -> Path:
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-    # sanitize — only hex
+    # sanitize — non-empty hex (uuid4().hex is 32 chars; allow up to 64 for safety)
+    if not session_id or not (8 <= len(session_id) <= 64):
+        raise HTTPException(status_code=400, detail="Invalid session_id")
     if not all(c in "0123456789abcdef-" for c in session_id):
         raise HTTPException(status_code=400, detail="Invalid session_id")
     return SESSIONS_DIR / f"{session_id}.bin"

@@ -1,5 +1,4 @@
 import base64
-import io
 import uuid
 from pathlib import Path
 
@@ -37,6 +36,8 @@ PREVIEW_MAX_EDGE = 1280
 
 
 def _session_path(session_id: str) -> Path:
+    if not session_id or not (8 <= len(session_id) <= 64):
+        raise HTTPException(status_code=400, detail="Invalid session_id")
     if not all(c in "0123456789abcdef-" for c in session_id):
         raise HTTPException(status_code=400, detail="Invalid session_id")
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)

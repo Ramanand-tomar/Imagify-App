@@ -178,13 +178,22 @@ async def _open_upstream(url: str) -> tuple[httpx.AsyncClient, httpx.Response]:
     """Open a streaming GET against ``url``, with one retry on transient failures.
 
     Returns the live (client, response). Caller is responsible for closing both.
+
+    We send ``Accept-Encoding: identity`` so the CDN does not gzip the body.
+    Without this, ``aiter_bytes`` would decode the body but upstream's
+    ``Content-Length`` would still be the compressed value — forwarding that
+    header to the client truncates the download and corrupts binary files.
     """
+    upstream_headers = {
+        "User-Agent": "Imagify/1.0",
+        "Accept-Encoding": "identity",
+    }
     last_exc: Exception | None = None
     for attempt in range(DOWNLOAD_RETRIES + 1):
         client = httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT_SECONDS, follow_redirects=True)
         try:
             response = await client.send(
-                client.build_request("GET", url, headers={"User-Agent": "Imagify/1.0"}),
+                client.build_request("GET", url, headers=upstream_headers),
                 stream=True,
             )
         except (httpx.HTTPError, httpx.NetworkError) as exc:
@@ -283,7 +292,11 @@ async def download_task_result(
 
     async def stream_body():
         try:
-            async for chunk in upstream.aiter_bytes(chunk_size=64 * 1024):
+            # Use aiter_raw to avoid httpx auto-decoding any encoded body.
+            # We requested Accept-Encoding: identity so upstream should send
+            # the file as-is, and aiter_raw guarantees we forward those exact
+            # bytes to the client.
+            async for chunk in upstream.aiter_raw(chunk_size=64 * 1024):
                 yield chunk
         finally:
             await upstream.aclose()
@@ -298,9 +311,17 @@ async def download_task_result(
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
     }
-    # Only forward Content-Length if upstream gave us one; do NOT use the
-    # stored size_bytes here — if upstream is chunked or differs, the client
-    # would get truncated/corrupt data.
+
+    # Forward upstream encoding/length together so the client receives a
+    # self-consistent response. We're using aiter_raw so the bytes we send
+    # are exactly what upstream sent (encoded or identity). If upstream
+    # honoured our Accept-Encoding: identity, encoding will be empty/identity
+    # and Content-Length is the plain file size. If it didn't, encoding will
+    # be e.g. "gzip" and Content-Length is the compressed size — both still
+    # consistent with the bytes we forward.
+    upstream_encoding = (upstream.headers.get("content-encoding") or "").strip()
+    if upstream_encoding and upstream_encoding.lower() != "identity":
+        headers["Content-Encoding"] = upstream_encoding
     upstream_length = upstream.headers.get("content-length")
     if upstream_length and upstream_length.isdigit():
         headers["Content-Length"] = upstream_length

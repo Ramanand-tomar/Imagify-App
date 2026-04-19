@@ -12,7 +12,7 @@ from app.services.task_helpers import (
     finalize_task_sync,
     load_stashed,
     mark_task_failed_sync,
-    remove_stashed,
+    remove_stashed_unless_retrying,
 )
 
 
@@ -38,9 +38,11 @@ def extract_pdf_text_task(
 ) -> str:
     row_id = uuid.UUID(task_row_id)
     session = SyncSessionLocal()
+    succeeded = False
     try:
         task = _load_task(session, row_id)
         if task is None:
+            succeeded = True
             return "task-not-found"
 
         from app.models.task import TaskStatus
@@ -59,7 +61,13 @@ def extract_pdf_text_task(
         stem = Path(original_filename).stem or "extracted"
         out_name = f"{stem}_text.txt"
         finalize_task_sync(session, task, result_bytes, out_name, "text/plain")
+        succeeded = True
         return "ok"
     finally:
-        remove_stashed(stash_path)
+        remove_stashed_unless_retrying(
+            stash_path,
+            retries=self.request.retries,
+            max_retries=self.max_retries or 0,
+            succeeded=succeeded,
+        )
         session.close()

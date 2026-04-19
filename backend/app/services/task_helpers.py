@@ -68,6 +68,40 @@ def remove_stashed(path: str | os.PathLike[str]) -> None:
         pass
 
 
+def remove_stashed_unless_retrying(
+    path: str | os.PathLike[str],
+    *,
+    retries: int,
+    max_retries: int,
+    succeeded: bool,
+) -> None:
+    """Remove a stashed source file only when it is safe to do so.
+
+    Called from a Celery task's ``finally`` block — when the task is going to
+    be retried, the source bytes must remain on disk for the next attempt.
+    """
+    final_attempt = retries >= max_retries
+    if succeeded or final_attempt:
+        remove_stashed(path)
+
+
+def cleanup_stale_stash(max_age_seconds: int = 6 * 60 * 60) -> int:
+    """Best-effort sweeper for orphaned stash files (e.g. crashed worker)."""
+    import time
+    now = time.time()
+    removed = 0
+    if not SHARED_TMP.exists():
+        return 0
+    for p in SHARED_TMP.iterdir():
+        try:
+            if p.is_file() and (now - p.stat().st_mtime) > max_age_seconds:
+                p.unlink(missing_ok=True)
+                removed += 1
+        except Exception:
+            continue
+    return removed
+
+
 # ---- sync-path helpers (used by FastAPI handlers) ---------------------------
 
 
